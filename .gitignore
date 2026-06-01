@@ -1,0 +1,18 @@
+# Binaries
+server
+*.exe
+*.dll
+*.so
+*.dylib
+
+# SQLite Databases and exports
+data/
+
+# Samples generated locally (except sample files if desired, but we let cmd/server auto-generate it anyway)
+samples/biometrics_sample.csv
+
+# IDEs and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

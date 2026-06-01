@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antigravity Pipeline Hub</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- ChartJS for Gorgeous Latency Renderings -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="glow-bg"></div>
+    
+    <header class="app-header">
+        <div class="logo">
+            <div class="logo-icon"><i class="fa-solid fa-circle-nodes pulse-icon"></i></div>
+            <h1>ANTIGRAVITY <span>PIPELINE HUB</span></h1>
+        </div>
+        <div class="system-status">
+            <span class="status-indicator online"></span>
+            <span class="status-text">Engine Online</span>
+            <a href="/metrics" target="_blank" class="btn-metrics"><i class="fa-solid fa-chart-line"></i> Prometheus Metrics</a>
+        </div>
+    </header>
+
+    <main class="dashboard-grid">
+        <!-- LEFT COLUMN: Action Panel -->
+        <section class="panel panel-left glass-card">
+            <div class="panel-header">
+                <h2><i class="fa-solid fa-plus-circle text-gradient"></i> Launch Pipeline</h2>
+                <p>Configure and trigger a new concurrent processing job.</p>
+            </div>
+            
+            <div class="presets-container">
+                <span class="preset-label">Templates:</span>
+                <button type="button" class="btn-preset active" id="preset-covid"><i class="fa-solid fa-virus"></i> COVID-19 CSV</button>
+                <button type="button" class="btn-preset" id="preset-crypto"><i class="fa-solid fa-coins"></i> Crypto JSON API</button>
+                <button type="button" class="btn-preset" id="preset-mock"><i class="fa-solid fa-file-csv"></i> Local Heights/Weights</button>
+            </div>
+
+            <form id="pipeline-form">
+                <div class="form-group">
+                    <label for="job-id"><i class="fa-solid fa-fingerprint"></i> Job ID (Optional)</label>
+                    <input type="text" id="job-id" placeholder="Auto-generated if left blank" autocomplete="off">
+                </div>
+                
+                <div class="form-group">
+                    <label for="job-name"><i class="fa-solid fa-signature"></i> Job Name</label>
+                    <input type="text" id="job-name" required placeholder="E.g. Covid Analytics Pipeline">
+                </div>
+
+                <div class="form-group">
+                    <label for="job-config"><i class="fa-solid fa-code"></i> Job Specification (JSON)</label>
+                    <div class="editor-container">
+                        <textarea id="job-config" class="code-editor" required spellcheck="false" rows="18"></textarea>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary" id="btn-submit">
+                    <i class="fa-solid fa-rocket"></i> Dispatch Pipeline
+                </button>
+            </form>
+        </section>
+
+        <!-- RIGHT COLUMN: Monitoring Panel -->
+        <section class="panel panel-right">
+            <div class="monitoring-header glass-card">
+                <h2><i class="fa-solid fa-gauge-high text-gradient"></i> Active Telemetry</h2>
+                <button id="btn-refresh" class="btn btn-secondary"><i class="fa-solid fa-arrows-rotate"></i> Refresh</button>
+            </div>
+
+            <div class="jobs-list-container" id="jobs-container">
+                <!-- Dynamic Jobs go here -->
+                <div class="empty-state">
+                    <i class="fa-solid fa-network-wired text-muted"></i>
+                    <p>No pipelines found. Dispatch a job to begin monitoring.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal for Detailed Job Inspection -->
+    <div class="modal" id="details-modal">
+        <div class="modal-content glass-card">
+            <header class="modal-header">
+                <div>
+                    <h3 id="modal-title">Job Details</h3>
+                    <span id="modal-job-id" class="badge badge-id"></span>
+                </div>
+                <button class="btn-close-modal" id="btn-close-modal"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            
+            <div class="modal-body">
+                <!-- Metrics Cards -->
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <span class="m-label">State</span>
+                        <span class="m-val" id="det-status">PENDING</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="m-label">Success Rate</span>
+                        <span class="m-val" id="det-success-rate">0%</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="m-label">Throughput</span>
+                        <span class="m-val" id="det-rate">0.0 recs/s</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="m-label">Time Elapsed</span>
+                        <span class="m-val" id="det-duration">0s</span>
+                    </div>
+                </div>
+
+                <!-- Record Counters Progress Bar -->
+                <div class="progress-details-section">
+                    <div class="p-labels">
+                        <span>Progress (Processed & Failed / Total)</span>
+                        <span id="det-progress-text">0 / 0</span>
+                    </div>
+                    <div class="progress-bar-container large">
+                        <div class="progress-bar-fill success" id="det-progress-success" style="width: 0%"></div>
+                        <div class="progress-bar-fill error" id="det-progress-failed" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Tabbed Layout for Results / Latency / Errors -->
+                <div class="tabs-container">
+                    <div class="tab-buttons">
+                        <button class="tab-btn active" data-tab="tab-latency"><i class="fa-solid fa-hourglass-half"></i> Latency Latches</button>
+                        <button class="tab-btn" data-tab="tab-results"><i class="fa-solid fa-chart-pie"></i> Aggregations</button>
+                        <button class="tab-btn" data-tab="tab-errors"><i class="fa-solid fa-bug"></i> Failed Audits (<span id="det-err-count">0</span>)</button>
+                    </div>
+                    
+                    <div class="tab-panes">
+                        <!-- Pane: Latency Chart -->
+                        <div class="tab-pane active" id="tab-latency">
+                            <div class="chart-container">
+                                <canvas id="latencyChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Pane: Aggregated Results -->
+                        <div class="tab-pane" id="tab-results">
+                            <div class="results-viewer">
+                                <div class="results-header">
+                                    <span>Summary Analytics</span>
+                                    <span id="det-results-time" class="text-muted"></span>
+                                </div>
+                                <pre><code id="det-results-code" class="language-json">{}</code></pre>
+                            </div>
+                        </div>
+
+                        <!-- Pane: Error Logger -->
+                        <div class="tab-pane" id="tab-errors">
+                            <div class="errors-viewer">
+                                <table class="errors-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Stage</th>
+                                            <th>Source</th>
+                                            <th>Record Ref</th>
+                                            <th>Error Cause</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="det-errors-list">
+                                        <tr>
+                                            <td colspan="4" class="text-center text-muted">No record errors encountered. Good work!</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <footer class="modal-footer">
+                <button class="btn btn-danger" id="btn-cancel-job"><i class="fa-solid fa-circle-stop"></i> Abort Pipeline</button>
+                <button class="btn btn-secondary" id="btn-delete-job"><i class="fa-solid fa-trash-can"></i> Wipe Logs</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>

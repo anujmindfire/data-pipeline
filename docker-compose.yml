@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  pipeline-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: antigravity-pipeline-service
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount the local data folder to persist SQLite databases and generated JSON/CSV exports
+      - ./data:/app/data
+      # Mount local samples folder so custom datasets can be added and fed on the fly
+      - ./samples:/app/samples
+    environment:
+      - PIPELINE_ADDR=0.0.0.0:8080
+    restart: unless-stopped
