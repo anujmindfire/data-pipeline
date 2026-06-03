@@ -7,14 +7,14 @@ services:
     ports:
       - "5433:5432"
     environment:
-      - POSTGRES_DB=datapipeline
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=Admin1234
+      - POSTGRES_DB=${DB_DATABASE}
+      - POSTGRES_USER=${DB_USERS}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d datapipeline"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -33,9 +33,9 @@ services:
       - PIPELINE_ADDR=0.0.0.0:8080
       - DB_HOST=postgres-db
       - DB_PORT=5432
-      - DB_DATABASE=datapipeline
-      - DB_USERS=postgres
-      - DB_PASSWORD=Admin1234
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERS=${DB_USERS}
+      - DB_PASSWORD=${DB_PASSWORD}
     depends_on:
       postgres-db:
         condition: service_healthy
