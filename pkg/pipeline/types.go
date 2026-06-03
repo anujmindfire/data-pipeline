@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -114,4 +115,42 @@ type AggregatedResult struct {
 
 // Custom double for compatibility if we want simpler floats.
 type double = float64
+
+// UnmarshalJSON implements custom unmarshaling to support both new and old config names.
+func (j *JobSpec) UnmarshalJSON(data []byte) error {
+	type Alias JobSpec
+	aux := &struct {
+		*Alias
+		AggregationSpecs []AggregationSpec `json:"aggregation_specs"`
+		Workers          WorkerConfig      `json:"workers"`
+	}{
+		Alias: (*Alias)(j),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if len(j.AggregationTypes) == 0 && len(aux.AggregationSpecs) > 0 {
+		j.AggregationTypes = aux.AggregationSpecs
+	}
+	if j.WorkerPoolSizes.Validation == 0 && j.WorkerPoolSizes.Transformation == 0 {
+		if aux.Workers.Validation > 0 || aux.Workers.Transformation > 0 {
+			j.WorkerPoolSizes = aux.Workers
+		}
+	}
+	return nil
+}
+
+// MarshalJSON implements custom marshaling to serialize both representation properties.
+func (j *JobSpec) MarshalJSON() ([]byte, error) {
+	type Alias JobSpec
+	return json.Marshal(&struct {
+		*Alias
+		AggregationSpecs []AggregationSpec `json:"aggregation_specs,omitempty"`
+		Workers          WorkerConfig      `json:"workers,omitempty"`
+	}{
+		Alias:            (*Alias)(j),
+		AggregationSpecs: j.AggregationTypes,
+		Workers:          j.WorkerPoolSizes,
+	})
+}
 

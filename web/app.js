@@ -443,7 +443,7 @@ async function fetchErrors(jobId) {
 
         const tbody = document.getElementById("det-errors-list");
         if (!errs || errs.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">No record errors encountered. Good work!</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">No record errors encountered. Good work!</td></tr>`;
             return;
         }
 
@@ -451,9 +451,8 @@ async function fetchErrors(jobId) {
         errs.forEach(e => {
             html += `
                 <tr>
-                    <td class="text-danger">${e.stage}</td>
-                    <td>${e.source_id || 'System'}</td>
-                    <td>${e.record_id || 'N/A'}</td>
+                    <td class="text-danger" style="font-weight: 600;">${e.stage}</td>
+                    <td><code style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #cbd5e1; background: rgba(255, 255, 255, 0.05); padding: 4px 8px; border-radius: 4px; word-break: break-all; display: block; max-height: 80px; overflow-y: auto;">${e.raw_data || 'N/A'}</code></td>
                     <td>${e.error_message}</td>
                 </tr>`;
         });
