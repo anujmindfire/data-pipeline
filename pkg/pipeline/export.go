@@ -8,17 +8,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"data-processing-pipeline/pkg/db"
+	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/pkg/repository"
 )
 
 // StartExportStage handles streaming record exports and writing final aggregations.
 func StartExportStage(
 	ctx context.Context,
-	jobSpec *JobSpec,
-	database *db.DB,
-	transformedCh <-chan Record,
-	resultCh <-chan map[string]any,
+	jobSpec *models.JobSpec,
+	resultRepo *repository.JobResultsRepository,
+	transformedCh <-chan models.Record,
+	resultCh <-chan models.AggregatedResult,
 	errorCh chan<- ErrorEvent,
 	progressCh chan<- ProgressEvent,
 	exportDone chan<- struct{},
@@ -82,7 +84,7 @@ func StartExportStage(
 		}()
 
 		// Consume transformed records for streaming export
-		consumerChan := make(chan Record, 100)
+		consumerChan := make(chan models.Record, 100)
 		
 		// We spawn a helper to feed the consumer to avoid blocking the main thread
 		go func() {
@@ -105,7 +107,7 @@ func StartExportStage(
 
 				// 1. Export as JSON Stream
 				if jsonFile != nil {
-					data, err := json.Marshal(record.Payload)
+					data, err := json.Marshal(record.ParsedData)
 					if err != nil {
 						sendExportError(jobSpec.ID, "marshal_json_record", err, errorCh)
 					} else {
@@ -120,8 +122,8 @@ func StartExportStage(
 				if csvWriter != nil {
 					if csvHeaders == nil {
 						// Collect headers from payload
-						csvHeaders = make([]string, 0, len(record.Payload))
-						for k := range record.Payload {
+						csvHeaders = make([]string, 0, len(record.ParsedData))
+						for k := range record.ParsedData {
 							csvHeaders = append(csvHeaders, k)
 						}
 						if err := csvWriter.Write(csvHeaders); err != nil {
@@ -131,7 +133,7 @@ func StartExportStage(
 
 					row := make([]string, len(csvHeaders))
 					for i, h := range csvHeaders {
-						val := record.Payload[h]
+						val := record.ParsedData[h]
 						if val == nil {
 							row[i] = ""
 						} else {
@@ -162,7 +164,9 @@ func StartExportStage(
 			return
 		case results, ok := <-resultCh:
 			if !ok {
-				results = map[string]any{"message": "No aggregation executed"}
+				results = models.AggregatedResult{
+					JobID: jobSpec.ID,
+				}
 			}
 
 			// Export final aggregations JSON
@@ -182,9 +186,15 @@ func StartExportStage(
 				}
 			}
 
-			// Save into SQLite Database
+			// Save into PostgreSQL Database
 			pathsJSON, _ := json.Marshal(exportedPaths)
-			if err := database.SaveJobResults(jobSpec.ID, string(resultsJSON), string(pathsJSON)); err != nil {
+			jobResults := &models.JobResults{
+				JobID:       jobSpec.ID,
+				ResultsJSON: string(resultsJSON),
+				ExportPaths: string(pathsJSON),
+				UpdatedAt:   time.Now(),
+			}
+			if err := resultRepo.Save(jobResults); err != nil {
 				sendExportError(jobSpec.ID, "db_save_results", err, errorCh)
 			}
 			progressCh <- ProgressEvent{
@@ -201,8 +211,8 @@ func sendExportError(jobID string, ref string, err error, errorCh chan<- ErrorEv
 	errorCh <- ErrorEvent{
 		JobID:        jobID,
 		Stage:        "export",
-		SourceID:     "export_engine",
-		RecordID:     ref,
+		RawData:      fmt.Sprintf(`{"ref": "%s"}`, ref),
 		ErrorMessage: err.Error(),
 	}
 }
+

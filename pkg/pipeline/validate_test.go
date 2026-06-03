@@ -2,10 +2,12 @@ package pipeline
 
 import (
 	"testing"
+
+	"data-processing-pipeline/pkg/models"
 )
 
 func TestValidationRules(t *testing.T) {
-	rules := []ValidationRuleSpec{
+	rules := []models.ValidationRuleSpec{
 		{Field: "country", Rule: "required"},
 		{Field: "cases", Rule: "min", Param: "0"},
 		{Field: "deaths", Rule: "max", Param: "100"},
@@ -76,11 +78,11 @@ func TestValidationRules(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := Record{
-				JobID:    "test-job",
-				SourceID: "test-src",
-				RecordID: "rec-1",
-				Payload:  tt.payload,
+			rec := models.Record{
+				JobID:      "test-job",
+				SourceID:   "test-src",
+				RowID:      1,
+				ParsedData: tt.payload,
 			}
 			errs := runValidation(rec, validators)
 			if tt.isValid && len(errs) > 0 {

@@ -11,10 +11,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"data-processing-pipeline/pkg/models"
 )
 
 // IngestSource orchestrates reading from a specific source configuration and sends unified Records.
-func IngestSource(ctx context.Context, jobID string, src SourceSpec, recordsCh chan<- Record, progressCh chan<- ProgressEvent, errorCh chan<- ErrorEvent) {
+func IngestSource(ctx context.Context, jobID string, src models.SourceSpec, recordsCh chan<- models.Record, progressCh chan<- ProgressEvent, errorCh chan<- ErrorEvent) {
 	defer func() {
 		// Signal source ingestion completion
 		progressCh <- ProgressEvent{
@@ -76,7 +78,7 @@ func IngestSource(ctx context.Context, jobID string, src SourceSpec, recordsCh c
 	}
 }
 
-func parseCSV(ctx context.Context, jobID string, src SourceSpec, reader io.Reader, recordsCh chan<- Record, progressCh chan<- ProgressEvent, errorCh chan<- ErrorEvent) error {
+func parseCSV(ctx context.Context, jobID string, src models.SourceSpec, reader io.Reader, recordsCh chan<- models.Record, progressCh chan<- ProgressEvent, errorCh chan<- ErrorEvent) error {
 	csvReader := csv.NewReader(reader)
 	
 	// Read headers
@@ -113,15 +115,16 @@ func parseCSV(ctx context.Context, jobID string, src SourceSpec, reader io.Reade
 		}
 
 		payload := mapRecord(rawData, src.Schema)
+		rawBytes, _ := json.Marshal(rawData)
 
-		recordsCh <- Record{
-			JobID:     jobID,
-			SourceID:  src.ID,
-			RecordID:  fmt.Sprintf("%s-row-%d", src.ID, lineNum),
-			RawData:   rawData,
-			Payload:   payload,
-			Valid:     true,
-			Timestamp: time.Now(),
+		recordsCh <- models.Record{
+			JobID:      jobID,
+			RowID:      int64(lineNum),
+			RawPayload: rawBytes,
+			ParsedData: payload,
+			IsValid:    true,
+			SourceID:   src.ID,
+			Timestamp:  time.Now(),
 		}
 
 		progressCh <- ProgressEvent{
@@ -135,7 +138,7 @@ func parseCSV(ctx context.Context, jobID string, src SourceSpec, reader io.Reade
 	return nil
 }
 
-func parseJSON(ctx context.Context, jobID string, src SourceSpec, reader io.Reader, recordsCh chan<- Record, progressCh chan<- ProgressEvent, errorCh chan<- ErrorEvent) error {
+func parseJSON(ctx context.Context, jobID string, src models.SourceSpec, reader io.Reader, recordsCh chan<- models.Record, progressCh chan<- ProgressEvent, errorCh chan<- ErrorEvent) error {
 	// Decode JSON
 	var raw interface{}
 	decoder := json.NewDecoder(reader)
@@ -159,14 +162,15 @@ func parseJSON(ctx context.Context, jobID string, src SourceSpec, reader io.Read
 			}
 
 			payload := mapRecord(recordMap, src.Schema)
-			recordsCh <- Record{
-				JobID:     jobID,
-				SourceID:  src.ID,
-				RecordID:  fmt.Sprintf("%s-idx-%d", src.ID, idx),
-				RawData:   recordMap,
-				Payload:   payload,
-				Valid:     true,
-				Timestamp: time.Now(),
+			rawBytes, _ := json.Marshal(recordMap)
+			recordsCh <- models.Record{
+				JobID:      jobID,
+				RowID:      int64(idx + 1),
+				RawPayload: rawBytes,
+				ParsedData: payload,
+				IsValid:    true,
+				SourceID:   src.ID,
+				Timestamp:  time.Now(),
 			}
 
 			progressCh <- ProgressEvent{
@@ -179,14 +183,15 @@ func parseJSON(ctx context.Context, jobID string, src SourceSpec, reader io.Read
 		}
 	case map[string]interface{}: // Single JSON object
 		payload := mapRecord(val, src.Schema)
-		recordsCh <- Record{
-			JobID:     jobID,
-			SourceID:  src.ID,
-			RecordID:  fmt.Sprintf("%s-single", src.ID),
-			RawData:   val,
-			Payload:   payload,
-			Valid:     true,
-			Timestamp: time.Now(),
+		rawBytes, _ := json.Marshal(val)
+		recordsCh <- models.Record{
+			JobID:      jobID,
+			RowID:      1,
+			RawPayload: rawBytes,
+			ParsedData: payload,
+			IsValid:    true,
+			SourceID:   src.ID,
+			Timestamp:  time.Now(),
 		}
 
 		progressCh <- ProgressEvent{
@@ -224,8 +229,7 @@ func sendIngestError(jobID, sourceID, ref string, err error, errorCh chan<- Erro
 	errorCh <- ErrorEvent{
 		JobID:        jobID,
 		Stage:        "ingest",
-		SourceID:     sourceID,
-		RecordID:     ref,
+		RawData:      fmt.Sprintf(`{"source_id": "%s", "ref": "%s"}`, sourceID, ref),
 		ErrorMessage: err.Error(),
 	}
 }
@@ -252,8 +256,7 @@ type ProgressEvent struct {
 type ErrorEvent struct {
 	JobID        string `json:"job_id"`
 	Stage        string `json:"stage"`
-	SourceID     string `json:"source_id"`
-	RecordID     string `json:"record_id"`
+	RawData      string `json:"raw_data"`
 	ErrorMessage string `json:"error_message"`
 }
 

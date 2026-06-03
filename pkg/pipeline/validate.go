@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"sync"
+
+	"data-processing-pipeline/pkg/models"
 )
 
 const (
@@ -12,10 +14,10 @@ const (
 )
 
 // StartValidationStage spawns worker goroutines to validate records in parallel.
-func StartValidationStage(ctx context.Context, jobSpec *JobSpec, recordsCh <-chan Record, validatedCh chan<- Record, errorCh chan<- ErrorEvent, progressCh chan<- ProgressEvent) <-chan struct{} {
+func StartValidationStage(ctx context.Context, jobSpec *models.JobSpec, recordsCh <-chan models.Record, validatedCh chan<- models.Record, errorCh chan<- ErrorEvent, progressCh chan<- ProgressEvent) <-chan struct{} {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
-	numWorkers := jobSpec.Workers.Validation
+	numWorkers := jobSpec.WorkerPoolSizes.Validation
 	if numWorkers <= 0 {
 		numWorkers = 1
 	}
@@ -50,15 +52,14 @@ func StartValidationStage(ctx context.Context, jobSpec *JobSpec, recordsCh <-cha
 					errs := runValidation(record, compiledValidators)
 					if len(errs) > 0 {
 						// Record is invalid, send error events
-						record.Valid = false
+						record.IsValid = false
 						record.Errors = append(record.Errors, errs...)
 						
 						for _, errMsg := range errs {
 							errorCh <- ErrorEvent{
 								JobID:        record.JobID,
 								Stage:        "validation",
-								SourceID:     record.SourceID,
-								RecordID:     record.RecordID,
+								RawData:      string(record.RawPayload),
 								ErrorMessage: errMsg,
 							}
 						}
@@ -104,7 +105,7 @@ type compiledValidator struct {
 	check func(val interface{}) error
 }
 
-func compileValidationRules(rules []ValidationRuleSpec) ([]compiledValidator, error) {
+func compileValidationRules(rules []models.ValidationRuleSpec) ([]compiledValidator, error) {
 	validators := make([]compiledValidator, 0, len(rules))
 
 	for _, spec := range rules {
@@ -248,11 +249,11 @@ func compileValidationRules(rules []ValidationRuleSpec) ([]compiledValidator, er
 	return validators, nil
 }
 
-func runValidation(record Record, validators []compiledValidator) []string {
+func runValidation(record models.Record, validators []compiledValidator) []string {
 	var errs []string
 	for _, v := range validators {
-		// Fetch field value from Payload
-		val := record.Payload[v.field]
+		// Fetch field value from ParsedData
+		val := record.ParsedData[v.field]
 		if err := v.check(val); err != nil {
 			errs = append(errs, err.Error())
 		}

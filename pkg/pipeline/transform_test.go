@@ -2,10 +2,12 @@ package pipeline
 
 import (
 	"testing"
+
+	"data-processing-pipeline/pkg/models"
 )
 
 func TestTransformationRules(t *testing.T) {
-	rules := []TransformRuleSpec{
+	rules := []models.TransformRuleSpec{
 		{Field: "raw_number", Rule: "cast", Param: "float"},
 		{Field: "raw_int", Rule: "cast", Param: "int"},
 		{Field: "name", Rule: "lower"},
@@ -28,9 +30,9 @@ func TestTransformationRules(t *testing.T) {
 		"city":       "   New York   ",
 	}
 
-	rec := Record{
-		JobID:   "test-job",
-		Payload: payload,
+	rec := models.Record{
+		JobID:      "test-job",
+		ParsedData: payload,
 	}
 
 	err = runTransformations(&rec, transformers)
@@ -39,32 +41,32 @@ func TestTransformationRules(t *testing.T) {
 	}
 
 	// 1. Check float cast + constant addition (100.5 + 10.5 = 111.0)
-	if f, ok := rec.Payload["raw_number"].(float64); !ok || f != 111.0 {
-		t.Errorf("Expected raw_number to be 111.0, got %v", rec.Payload["raw_number"])
+	if f, ok := rec.ParsedData["raw_number"].(float64); !ok || f != 111.0 {
+		t.Errorf("Expected raw_number to be 111.0, got %v", rec.ParsedData["raw_number"])
 	}
 
 	// 2. Check int cast
-	if i, ok := rec.Payload["raw_int"].(int64); !ok || i != 42 {
-		t.Errorf("Expected raw_int to be 42, got %v", rec.Payload["raw_int"])
+	if i, ok := rec.ParsedData["raw_int"].(int64); !ok || i != 42 {
+		t.Errorf("Expected raw_int to be 42, got %v", rec.ParsedData["raw_int"])
 	}
 
 	// 3. Check lowercase
-	if s, ok := rec.Payload["name"].(string); !ok || s != "john doe" {
-		t.Errorf("Expected name to be 'john doe', got '%v'", rec.Payload["name"])
+	if s, ok := rec.ParsedData["name"].(string); !ok || s != "john doe" {
+		t.Errorf("Expected name to be 'john doe', got '%v'", rec.ParsedData["name"])
 	}
 
 	// 4. Check uppercase
-	if s, ok := rec.Payload["symbol"].(string); !ok || s != "BTC" {
-		t.Errorf("Expected symbol to be 'BTC', got '%v'", rec.Payload["symbol"])
+	if s, ok := rec.ParsedData["symbol"].(string); !ok || s != "BTC" {
+		t.Errorf("Expected symbol to be 'BTC', got '%v'", rec.ParsedData["symbol"])
 	}
 
 	// 5. Check trim
-	if s, ok := rec.Payload["city"].(string); !ok || s != "New York" {
-		t.Errorf("Expected city to be 'New York', got '%v'", rec.Payload["city"])
+	if s, ok := rec.ParsedData["city"].(string); !ok || s != "New York" {
+		t.Errorf("Expected city to be 'New York', got '%v'", rec.ParsedData["city"])
 	}
 
 	// 6. Check time enrichment
-	if tStamp, ok := rec.Payload["processed_at"].(string); !ok || len(tStamp) == 0 {
-		t.Errorf("Expected enriched processed_at timestamp string, got %v", rec.Payload["processed_at"])
+	if tStamp, ok := rec.ParsedData["processed_at"].(string); !ok || len(tStamp) == 0 {
+		t.Errorf("Expected enriched processed_at timestamp string, got %v", rec.ParsedData["processed_at"])
 	}
 }
