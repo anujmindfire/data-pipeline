@@ -15,7 +15,7 @@ const (
 func StartValidationStage(ctx context.Context, jobSpec *JobSpec, recordsCh <-chan Record, validatedCh chan<- Record, errorCh chan<- ErrorEvent, progressCh chan<- ProgressEvent) <-chan struct{} {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
-	numWorkers := jobSpec.Workers.Validation
+	numWorkers := jobSpec.WorkerPoolSizes.Validation
 	if numWorkers <= 0 {
 		numWorkers = 1
 	}
@@ -50,15 +50,14 @@ func StartValidationStage(ctx context.Context, jobSpec *JobSpec, recordsCh <-cha
 					errs := runValidation(record, compiledValidators)
 					if len(errs) > 0 {
 						// Record is invalid, send error events
-						record.Valid = false
+						record.IsValid = false
 						record.Errors = append(record.Errors, errs...)
 						
 						for _, errMsg := range errs {
 							errorCh <- ErrorEvent{
 								JobID:        record.JobID,
 								Stage:        "validation",
-								SourceID:     record.SourceID,
-								RecordID:     record.RecordID,
+								RawData:      string(record.RawPayload),
 								ErrorMessage: errMsg,
 							}
 						}
@@ -251,8 +250,8 @@ func compileValidationRules(rules []ValidationRuleSpec) ([]compiledValidator, er
 func runValidation(record Record, validators []compiledValidator) []string {
 	var errs []string
 	for _, v := range validators {
-		// Fetch field value from Payload
-		val := record.Payload[v.field]
+		// Fetch field value from ParsedData
+		val := record.ParsedData[v.field]
 		if err := v.check(val); err != nil {
 			errs = append(errs, err.Error())
 		}

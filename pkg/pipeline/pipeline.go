@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,19 +13,19 @@ import (
 // Registry tracks all running pipeline jobs in-memory for immediate, low-latency API access.
 type Registry struct {
 	mu   sync.RWMutex
-	jobs map[string]*JobProgress
+	jobs map[string]*JobProgressTracker
 }
 
 var GlobalRegistry = &Registry{
-	jobs: make(map[string]*JobProgress),
+	jobs: make(map[string]*JobProgressTracker),
 }
 
 // Register adds a new job run to the registry.
-func (r *Registry) Register(jobID string, name string, cancel context.CancelFunc) *JobProgress {
+func (r *Registry) Register(jobID string, name string, cancel context.CancelFunc) *JobProgressTracker {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	jp := &JobProgress{
+	jp := &JobProgressTracker{
 		JobID:          jobID,
 		Name:           name,
 		Status:         StatusPending,
@@ -37,7 +38,7 @@ func (r *Registry) Register(jobID string, name string, cancel context.CancelFunc
 }
 
 // Get returns the progress status of a registered job.
-func (r *Registry) Get(jobID string) (*JobProgress, bool) {
+func (r *Registry) Get(jobID string) (*JobProgressTracker, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -46,11 +47,11 @@ func (r *Registry) Get(jobID string) (*JobProgress, bool) {
 }
 
 // List returns all registered job progress states.
-func (r *Registry) List() []*JobProgress {
+func (r *Registry) List() []*JobProgressTracker {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	list := make([]*JobProgress, 0, len(r.jobs))
+	list := make([]*JobProgressTracker, 0, len(r.jobs))
 	for _, jp := range r.jobs {
 		list = append(list, jp)
 	}
@@ -64,8 +65,8 @@ func (r *Registry) Delete(jobID string) {
 	delete(r.jobs, jobID)
 }
 
-// JobProgress represents the live status and telemetry of a pipeline job.
-type JobProgress struct {
+// JobProgressTracker represents the live status and telemetry of a pipeline job.
+type JobProgressTracker struct {
 	JobID            string            `json:"job_id"`
 	Name             string            `json:"name"`
 	Status           JobStatus         `json:"status"`
@@ -80,30 +81,66 @@ type JobProgress struct {
 	mu               sync.RWMutex
 }
 
+// ToExternal converts the tracker to the public JobProgress struct.
+func (jp *JobProgressTracker) ToExternal() JobProgress {
+	jp.mu.RLock()
+	defer jp.mu.RUnlock()
+
+	percent := 0.0
+	if jp.TotalRecords > 0 {
+		percent = float64(jp.ProcessedRecords+jp.FailedRecords) * 100.0 / float64(jp.TotalRecords)
+		if percent > 100 {
+			percent = 100
+		}
+	}
+
+	pending := jp.TotalRecords - (jp.ProcessedRecords + jp.FailedRecords)
+	if pending < 0 {
+		pending = 0
+	}
+
+	return JobProgress{
+		JobID:            jp.JobID,
+		RecordsProcessed: jp.ProcessedRecords,
+		RecordsPending:   pending,
+		ErrorCount:       jp.FailedRecords,
+		PercentComplete:  percent,
+		ProcessingRate:   jp.ProcessingRate,
+		Name:             jp.Name,
+		Status:           jp.Status,
+		TotalRecords:     jp.TotalRecords,
+		ProcessedRecords: jp.ProcessedRecords,
+		FailedRecords:    jp.FailedRecords,
+		StartTime:        jp.StartTime,
+		EndTime:          jp.EndTime,
+		StageLatencies:   jp.StageLatencies,
+	}
+}
+
 // Cancel terminates a running job.
-func (jp *JobProgress) Cancel() {
+func (jp *JobProgressTracker) Cancel() {
 	if jp.CancelFunc != nil {
 		jp.CancelFunc()
 	}
 }
 
 // Lock locks the progress metrics for write access.
-func (jp *JobProgress) Lock() {
+func (jp *JobProgressTracker) Lock() {
 	jp.mu.Lock()
 }
 
 // Unlock unlocks the progress metrics for write access.
-func (jp *JobProgress) Unlock() {
+func (jp *JobProgressTracker) Unlock() {
 	jp.mu.Unlock()
 }
 
 // RLock locks the progress metrics for read access.
-func (jp *JobProgress) RLock() {
+func (jp *JobProgressTracker) RLock() {
 	jp.mu.RLock()
 }
 
 // RUnlock unlocks the progress metrics for read access.
-func (jp *JobProgress) RUnlock() {
+func (jp *JobProgressTracker) RUnlock() {
 	jp.mu.RUnlock()
 }
 
@@ -129,7 +166,7 @@ func RunPipeline(ctx context.Context, database *db.DB, spec *JobSpec) error {
 	validatedCh := make(chan Record, 500)
 	transformedCh := make(chan Record, 500)
 	exportRecordsCh := make(chan Record, 500)
-	resultCh := make(chan map[string]any, 1)
+	resultCh := make(chan AggregatedResult, 1)
 	
 	// Telemetry and auditing channels
 	progressCh := make(chan ProgressEvent, 500)
@@ -152,10 +189,10 @@ func RunPipeline(ctx context.Context, database *db.DB, spec *JobSpec) error {
 		defer bgWg.Done()
 		for errEv := range errorCh {
 			// Write error to SQLite
-			_ = database.InsertJobError(spec.ID, errEv.Stage, errEv.SourceID, errEv.RecordID, errEv.ErrorMessage)
+			_ = database.InsertJobError(spec.ID, errEv.Stage, errEv.RawData, errEv.ErrorMessage)
 			
-			// Increment failed count if not an general stage init error
-			if errEv.RecordID != "" && errEv.Stage != "export" {
+			// Increment failed count if it is a record-level error
+			if errEv.Stage != "export" && !strings.Contains(errEv.RawData, "setup") && !strings.Contains(errEv.RawData, "init") {
 				jp.mu.Lock()
 				jp.FailedRecords++
 				jp.mu.Unlock()
@@ -221,7 +258,7 @@ func RunPipeline(ctx context.Context, database *db.DB, spec *JobSpec) error {
 	}()
 
 	// 4. Start Throttled Database Syncer
-	// SQLite runs on a separate goroutine and updates progress metrics every 500ms to avoid I/O blocking
+	// SQLite updates progress metrics every 500ms to avoid I/O blocking
 	syncStop := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
@@ -281,8 +318,6 @@ func RunPipeline(ctx context.Context, database *db.DB, spec *JobSpec) error {
 	<-aggregationDone
 	<-exportDone
 
-
-
 	if ctx.Err() == context.Canceled {
 		finalStatus = StatusCancelled
 		errSum := "Job was cancelled by user request"
@@ -336,3 +371,4 @@ func RunPipeline(ctx context.Context, database *db.DB, spec *JobSpec) error {
 	_ = database.SetJobCounts(spec.ID, proc, fail)
 	return nil
 }
+

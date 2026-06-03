@@ -15,7 +15,7 @@ type Accumulator struct {
 }
 
 // StartAggregationStage collects transformed records and computes final metrics.
-func StartAggregationStage(ctx context.Context, jobSpec *JobSpec, transformedCh <-chan Record, exportRecordsCh chan<- Record, resultCh chan<- map[string]any, progressCh chan<- ProgressEvent) <-chan struct{} {
+func StartAggregationStage(ctx context.Context, jobSpec *JobSpec, transformedCh <-chan Record, exportRecordsCh chan<- Record, resultCh chan<- AggregatedResult, progressCh chan<- ProgressEvent) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -27,7 +27,7 @@ func StartAggregationStage(ctx context.Context, jobSpec *JobSpec, transformedCh 
 		groupAccs := make(map[string]map[string]*Accumulator) // target -> groupKey -> Accumulator
 
 		// Initialize accumulators based on job specifications
-		for _, spec := range jobSpec.AggregationSpecs {
+		for _, spec := range jobSpec.AggregationTypes {
 			if spec.GroupBy != "" {
 				groupAccs[spec.Target] = make(map[string]*Accumulator)
 			} else {
@@ -47,7 +47,7 @@ func StartAggregationStage(ctx context.Context, jobSpec *JobSpec, transformedCh 
 			case record, ok := <-transformedCh:
 				if !ok {
 					// Input channel closed, compile final results
-					results := compileFinalResults(jobSpec.AggregationSpecs, globalAccs, groupAccs)
+					results := compileFinalResults(jobSpec.ID, recordCount, jobSpec.AggregationTypes, globalAccs, groupAccs)
 					
 					// Send results to export stage
 					select {
@@ -67,8 +67,8 @@ func StartAggregationStage(ctx context.Context, jobSpec *JobSpec, transformedCh 
 				recordCount++
 
 				// Apply aggregations
-				for _, spec := range jobSpec.AggregationSpecs {
-					val, ok := record.Payload[spec.Field]
+				for _, spec := range jobSpec.AggregationTypes {
+					val, ok := record.ParsedData[spec.Field]
 					if !ok || val == nil {
 						continue // Skip if field is missing or null
 					}
@@ -79,7 +79,7 @@ func StartAggregationStage(ctx context.Context, jobSpec *JobSpec, transformedCh 
 					}
 
 					if spec.GroupBy != "" {
-						groupVal, ok := record.Payload[spec.GroupBy]
+						groupVal, ok := record.ParsedData[spec.GroupBy]
 						if !ok || groupVal == nil {
 							continue // Skip if group_by field is missing
 						}
@@ -134,8 +134,10 @@ func updateAccumulator(acc *Accumulator, val float64) {
 	acc.HasValue = true
 }
 
-func compileFinalResults(specs []AggregationSpec, global map[string]*Accumulator, group map[string]map[string]*Accumulator) map[string]any {
-	results := make(map[string]any)
+func compileFinalResults(jobID string, recordCount int64, specs []AggregationSpec, global map[string]*Accumulator, group map[string]map[string]*Accumulator) AggregatedResult {
+	sums := make(map[string]float64)
+	averages := make(map[string]float64)
+	groupedData := make(map[string]map[string]any)
 
 	for _, spec := range specs {
 		if spec.GroupBy != "" {
@@ -149,19 +151,36 @@ func compileFinalResults(specs []AggregationSpec, global map[string]*Accumulator
 				}
 				groupResult[groupKey] = extractValue(spec.Func, acc)
 			}
-			results[spec.Target] = groupResult
+			groupedData[spec.Target] = groupResult
 		} else {
 			// Compile Global aggregation
 			acc := global[spec.Target]
 			if !acc.HasValue {
-				results[spec.Target] = nil
 				continue
 			}
-			results[spec.Target] = extractValue(spec.Func, acc)
+			val := extractValue(spec.Func, acc)
+			var f float64
+			switch v := val.(type) {
+			case float64:
+				f = v
+			case int64:
+				f = float64(v)
+			}
+			if spec.Func == "avg" {
+				averages[spec.Target] = f
+			} else {
+				sums[spec.Target] = f
+			}
 		}
 	}
 
-	return results
+	return AggregatedResult{
+		JobID:       jobID,
+		TotalCount:  recordCount,
+		Sums:        sums,
+		Averages:    averages,
+		GroupedData: groupedData,
+	}
 }
 
 func extractValue(fn string, acc *Accumulator) any {
@@ -198,3 +217,4 @@ func stringify(val interface{}) string {
 		return fmt.Sprintf("%v", val)
 	}
 }
+

@@ -113,15 +113,16 @@ func parseCSV(ctx context.Context, jobID string, src SourceSpec, reader io.Reade
 		}
 
 		payload := mapRecord(rawData, src.Schema)
+		rawBytes, _ := json.Marshal(rawData)
 
 		recordsCh <- Record{
-			JobID:     jobID,
-			SourceID:  src.ID,
-			RecordID:  fmt.Sprintf("%s-row-%d", src.ID, lineNum),
-			RawData:   rawData,
-			Payload:   payload,
-			Valid:     true,
-			Timestamp: time.Now(),
+			JobID:      jobID,
+			RowID:      int64(lineNum),
+			RawPayload: rawBytes,
+			ParsedData: payload,
+			IsValid:    true,
+			SourceID:   src.ID,
+			Timestamp:  time.Now(),
 		}
 
 		progressCh <- ProgressEvent{
@@ -159,14 +160,15 @@ func parseJSON(ctx context.Context, jobID string, src SourceSpec, reader io.Read
 			}
 
 			payload := mapRecord(recordMap, src.Schema)
+			rawBytes, _ := json.Marshal(recordMap)
 			recordsCh <- Record{
-				JobID:     jobID,
-				SourceID:  src.ID,
-				RecordID:  fmt.Sprintf("%s-idx-%d", src.ID, idx),
-				RawData:   recordMap,
-				Payload:   payload,
-				Valid:     true,
-				Timestamp: time.Now(),
+				JobID:      jobID,
+				RowID:      int64(idx + 1),
+				RawPayload: rawBytes,
+				ParsedData: payload,
+				IsValid:    true,
+				SourceID:   src.ID,
+				Timestamp:  time.Now(),
 			}
 
 			progressCh <- ProgressEvent{
@@ -179,14 +181,15 @@ func parseJSON(ctx context.Context, jobID string, src SourceSpec, reader io.Read
 		}
 	case map[string]interface{}: // Single JSON object
 		payload := mapRecord(val, src.Schema)
+		rawBytes, _ := json.Marshal(val)
 		recordsCh <- Record{
-			JobID:     jobID,
-			SourceID:  src.ID,
-			RecordID:  fmt.Sprintf("%s-single", src.ID),
-			RawData:   val,
-			Payload:   payload,
-			Valid:     true,
-			Timestamp: time.Now(),
+			JobID:      jobID,
+			RowID:      1,
+			RawPayload: rawBytes,
+			ParsedData: payload,
+			IsValid:    true,
+			SourceID:   src.ID,
+			Timestamp:  time.Now(),
 		}
 
 		progressCh <- ProgressEvent{
@@ -224,8 +227,7 @@ func sendIngestError(jobID, sourceID, ref string, err error, errorCh chan<- Erro
 	errorCh <- ErrorEvent{
 		JobID:        jobID,
 		Stage:        "ingest",
-		SourceID:     sourceID,
-		RecordID:     ref,
+		RawData:      fmt.Sprintf(`{"source_id": "%s", "ref": "%s"}`, sourceID, ref),
 		ErrorMessage: err.Error(),
 	}
 }
@@ -252,8 +254,7 @@ type ProgressEvent struct {
 type ErrorEvent struct {
 	JobID        string `json:"job_id"`
 	Stage        string `json:"stage"`
-	SourceID     string `json:"source_id"`
-	RecordID     string `json:"record_id"`
+	RawData      string `json:"raw_data"`
 	ErrorMessage string `json:"error_message"`
 }
 

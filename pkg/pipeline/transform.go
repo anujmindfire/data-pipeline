@@ -13,7 +13,7 @@ import (
 func StartTransformationStage(ctx context.Context, jobSpec *JobSpec, validatedCh <-chan Record, transformedCh chan<- Record, errorCh chan<- ErrorEvent, progressCh chan<- ProgressEvent) <-chan struct{} {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
-	numWorkers := jobSpec.Workers.Transformation
+	numWorkers := jobSpec.WorkerPoolSizes.Transformation
 	if numWorkers <= 0 {
 		numWorkers = 1
 	}
@@ -50,14 +50,13 @@ func StartTransformationStage(ctx context.Context, jobSpec *JobSpec, validatedCh
 						errorCh <- ErrorEvent{
 							JobID:        record.JobID,
 							Stage:        "transform",
-							SourceID:     record.SourceID,
-							RecordID:     record.RecordID,
+							RawData:      string(record.RawPayload),
 							ErrorMessage: err.Error(),
 						}
 						// Even if transform fails, do we filter it?
 						// The prompt says "Filter or mark invalid records while continuing processing."
 						// So we mark it invalid and do not forward to aggregation.
-						record.Valid = false
+						record.IsValid = false
 						continue
 					}
 
@@ -231,7 +230,7 @@ func compileTransformRules(rules []TransformRuleSpec) ([]compiledTransformer, er
 
 func runTransformations(record *Record, transformers []compiledTransformer) error {
 	for _, t := range transformers {
-		if err := t.apply(record.Payload); err != nil {
+		if err := t.apply(record.ParsedData); err != nil {
 			return err
 		}
 	}
