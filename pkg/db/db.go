@@ -9,7 +9,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type Job struct {
+type PipelineJob struct {
 	ID               string     `json:"id"`
 	Status           string     `json:"status"`
 	Config           string     `json:"config"`
@@ -26,10 +26,9 @@ type JobError struct {
 	ID           int       `json:"id"`
 	JobID        string    `json:"job_id"`
 	Stage        string    `json:"stage"`
-	SourceID     string    `json:"source_id"`
-	RecordID     string    `json:"record_id"`
+	RawData      string    `json:"raw_data"`
 	ErrorMessage string    `json:"error_message"`
-	Timestamp    time.Time `json:"timestamp"`
+	OccurredAt   time.Time `json:"occurred_at"`
 }
 
 type JobResults struct {
@@ -100,10 +99,9 @@ func (d *DB) initSchemas() error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			job_id TEXT NOT NULL,
 			stage TEXT NOT NULL,
-			source_id TEXT,
-			record_id TEXT,
+			raw_data TEXT NOT NULL,
 			error_message TEXT NOT NULL,
-			timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+			occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
 		);`,
 		`CREATE TABLE IF NOT EXISTS job_results (
@@ -206,13 +204,13 @@ func (d *DB) SetJobCounts(id string, processedCount int, failedCount int) error 
 }
 
 // InsertJobError stores validation or runtime failure details.
-func (d *DB) InsertJobError(jobID string, stage string, sourceID string, recordID string, errMsg string) error {
+func (d *DB) InsertJobError(jobID string, stage string, rawData string, errMsg string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	query := `INSERT INTO job_errors (job_id, stage, source_id, record_id, error_message, timestamp) 
-		VALUES (?, ?, ?, ?, ?, ?)`
-	_, err := d.db.Exec(query, jobID, stage, sourceID, recordID, errMsg, time.Now())
+	query := `INSERT INTO job_errors (job_id, stage, raw_data, error_message, occurred_at) 
+		VALUES (?, ?, ?, ?, ?)`
+	_, err := d.db.Exec(query, jobID, stage, rawData, errMsg, time.Now())
 	return err
 }
 
@@ -232,7 +230,7 @@ func (d *DB) SaveJobResults(jobID string, resultsJSON string, exportPathsJSON st
 }
 
 // GetJob returns job metadata by ID.
-func (d *DB) GetJob(id string) (*Job, error) {
+func (d *DB) GetJob(id string) (*PipelineJob, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -240,7 +238,7 @@ func (d *DB) GetJob(id string) (*Job, error) {
 		FROM jobs WHERE id = ?`
 	row := d.db.QueryRow(query, id)
 
-	var j Job
+	var j PipelineJob
 	var startedAt, completedAt sql.NullTime
 	var errorSummary sql.NullString
 
@@ -265,7 +263,7 @@ func (d *DB) GetJob(id string) (*Job, error) {
 }
 
 // ListJobs retrieves all jobs.
-func (d *DB) ListJobs() ([]Job, error) {
+func (d *DB) ListJobs() ([]PipelineJob, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -277,9 +275,9 @@ func (d *DB) ListJobs() ([]Job, error) {
 	}
 	defer rows.Close()
 
-	var list []Job
+	var list []PipelineJob
 	for rows.Next() {
-		var j Job
+		var j PipelineJob
 		var startedAt, completedAt sql.NullTime
 		var errorSummary sql.NullString
 
@@ -308,8 +306,8 @@ func (d *DB) GetJobErrors(id string) ([]JobError, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	query := `SELECT id, job_id, stage, source_id, record_id, error_message, timestamp 
-		FROM job_errors WHERE job_id = ? ORDER BY timestamp ASC`
+	query := `SELECT id, job_id, stage, raw_data, error_message, occurred_at 
+		FROM job_errors WHERE job_id = ? ORDER BY occurred_at ASC`
 	rows, err := d.db.Query(query, id)
 	if err != nil {
 		return nil, err
@@ -319,7 +317,7 @@ func (d *DB) GetJobErrors(id string) ([]JobError, error) {
 	var list []JobError
 	for rows.Next() {
 		var je JobError
-		err := rows.Scan(&je.ID, &je.JobID, &je.Stage, &je.SourceID, &je.RecordID, &je.ErrorMessage, &je.Timestamp)
+		err := rows.Scan(&je.ID, &je.JobID, &je.Stage, &je.RawData, &je.ErrorMessage, &je.OccurredAt)
 		if err != nil {
 			return nil, err
 		}
