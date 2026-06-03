@@ -77,10 +77,10 @@ func TestValidationRules(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := Record{
-				JobID:    "test-job",
-				SourceID: "test-src",
-				RecordID: "rec-1",
-				Payload:  tt.payload,
+				JobID:      "test-job",
+				SourceID:   "test-src",
+				RowID:      1,
+				ParsedData: tt.payload,
 			}
 			errs := runValidation(rec, validators)
 			if tt.isValid && len(errs) > 0 {

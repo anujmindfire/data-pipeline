@@ -105,11 +105,11 @@ func (s *Server) handleCreatePipeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set default workers if unset
-	if spec.Workers.Validation <= 0 {
-		spec.Workers.Validation = 3
+	if spec.WorkerPoolSizes.Validation <= 0 {
+		spec.WorkerPoolSizes.Validation = 3
 	}
-	if spec.Workers.Transformation <= 0 {
-		spec.Workers.Transformation = 3
+	if spec.WorkerPoolSizes.Transformation <= 0 {
+		spec.WorkerPoolSizes.Transformation = 3
 	}
 
 	// Automatically establish export targets if none specified
@@ -157,15 +157,16 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 
 	// Merge active in-memory counters for real-time progress lists
 	type enrichedJob struct {
-		db.Job
+		db.PipelineJob
 		ActiveProgress *pipeline.JobProgress `json:"active_progress,omitempty"`
 	}
 
 	enrichedList := make([]enrichedJob, len(dbJobs))
 	for i, dj := range dbJobs {
-		enrichedList[i] = enrichedJob{Job: dj}
+		enrichedList[i] = enrichedJob{PipelineJob: dj}
 		if jp, ok := pipeline.GlobalRegistry.Get(dj.ID); ok {
-			enrichedList[i].ActiveProgress = jp
+			extProgress := jp.ToExternal()
+			enrichedList[i].ActiveProgress = &extProgress
 		}
 	}
 
@@ -197,30 +198,8 @@ func (s *Server) handleGetProgress(w http.ResponseWriter, r *http.Request) {
 
 	// 1. Check in-memory active registry first (provides extreme real-time speed)
 	if jp, ok := pipeline.GlobalRegistry.Get(id); ok {
-		jp.RLock()
-		defer jp.RUnlock()
-
-		percent := 0.0
-		if jp.TotalRecords > 0 {
-			percent = float64(jp.ProcessedRecords+jp.FailedRecords) * 100.0 / float64(jp.TotalRecords)
-			if percent > 100 {
-				percent = 100
-			}
-		}
-
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"job_id":             jp.JobID,
-			"name":               jp.Name,
-			"status":             jp.Status,
-			"percent_complete":   percent,
-			"total_records":      jp.TotalRecords,
-			"processed_records":  jp.ProcessedRecords,
-			"failed_records":     jp.FailedRecords,
-			"processing_rate":    jp.ProcessingRate,
-			"start_time":         jp.StartTime,
-			"end_time":           jp.EndTime,
-			"stage_latencies_ms": jp.StageLatencies,
-		})
+		extProgress := jp.ToExternal()
+		_ = json.NewEncoder(w).Encode(extProgress)
 		return
 	}
 
@@ -238,17 +217,25 @@ func (s *Server) handleGetProgress(w http.ResponseWriter, r *http.Request) {
 		percent = 100.0
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"job_id":             job.ID,
-		"status":             job.Status,
-		"percent_complete":   percent,
-		"total_records":      job.TotalRecords,
-		"processed_records":  job.ProcessedRecords,
-		"failed_records":     job.FailedRecords,
-		"processing_rate":    0.0, // Finished jobs don't have active rate
-		"start_time":         job.StartedAt,
-		"end_time":           job.CompletedAt,
-		"stage_latencies_ms": map[string]float64{"archived": 0.0},
+	pending := int64(job.TotalRecords - (job.ProcessedRecords + job.FailedRecords))
+	if pending < 0 {
+		pending = 0
+	}
+
+	_ = json.NewEncoder(w).Encode(pipeline.JobProgress{
+		JobID:            job.ID,
+		RecordsProcessed: int64(job.ProcessedRecords),
+		RecordsPending:   pending,
+		ErrorCount:       int64(job.FailedRecords),
+		PercentComplete:  percent,
+		ProcessingRate:   0.0,
+		Name:             "Pipeline-" + job.ID,
+		Status:           pipeline.JobStatus(job.Status),
+		TotalRecords:     int64(job.TotalRecords),
+		ProcessedRecords: int64(job.ProcessedRecords),
+		FailedRecords:    int64(job.FailedRecords),
+		StartTime:        job.CreatedAt,
+		EndTime:          job.CompletedAt,
 	})
 }
 
@@ -265,17 +252,17 @@ func (s *Server) handleGetResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var resultsMap map[string]any
-	_ = json.Unmarshal([]byte(results.ResultsJSON), &resultsMap)
+	var aggregatedResult pipeline.AggregatedResult
+	_ = json.Unmarshal([]byte(results.ResultsJSON), &aggregatedResult)
 
 	var paths []string
 	_ = json.Unmarshal([]byte(results.ExportPaths), &paths)
 
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"job_id":      results.JobID,
-		"aggregates":  resultsMap,
+		"job_id":       results.JobID,
+		"aggregates":   aggregatedResult,
 		"export_files": paths,
-		"updated_at":  results.UpdatedAt,
+		"updated_at":   results.UpdatedAt,
 	})
 }
 

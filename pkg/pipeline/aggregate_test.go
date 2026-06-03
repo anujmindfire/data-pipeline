@@ -8,7 +8,7 @@ import (
 
 func TestAggregationRules(t *testing.T) {
 	spec := &JobSpec{
-		AggregationSpecs: []AggregationSpec{
+		AggregationTypes: []AggregationSpec{
 			{Field: "score", Func: "sum", Target: "total_score"},
 			{Field: "score", Func: "avg", Target: "avg_score"},
 			{Field: "score", Func: "min", Target: "min_score"},
@@ -21,7 +21,7 @@ func TestAggregationRules(t *testing.T) {
 
 	transformedCh := make(chan Record, 5)
 	exportRecordsCh := make(chan Record, 5)
-	resultCh := make(chan map[string]any, 1)
+	resultCh := make(chan AggregatedResult, 1)
 	progressCh := make(chan ProgressEvent, 10)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -40,10 +40,10 @@ func TestAggregationRules(t *testing.T) {
 
 	for i, r := range records {
 		transformedCh <- Record{
-			JobID:    "test-job",
-			SourceID: "src-1",
-			RecordID: stringify(i),
-			Payload:  r,
+			JobID:      "test-job",
+			SourceID:   "src-1",
+			RowID:      int64(i + 1),
+			ParsedData: r,
 		}
 	}
 	close(transformedCh)
@@ -58,7 +58,7 @@ func TestAggregationRules(t *testing.T) {
 	}()
 
 	// Wait for results
-	var results map[string]any
+	var results AggregatedResult
 	select {
 	case res, ok := <-resultCh:
 		if !ok {
@@ -70,34 +70,34 @@ func TestAggregationRules(t *testing.T) {
 	}
 
 	// 1. Verify global sum (10 + 20 + 5 + 15 = 50.0)
-	if val, ok := results["total_score"].(float64); !ok || val != 50.0 {
-		t.Errorf("Expected total_score 50.0, got %v", results["total_score"])
+	if val, ok := results.Sums["total_score"]; !ok || val != 50.0 {
+		t.Errorf("Expected total_score 50.0, got %v", results.Sums["total_score"])
 	}
 
 	// 2. Verify global average (50 / 4 = 12.5)
-	if val, ok := results["avg_score"].(float64); !ok || val != 12.5 {
-		t.Errorf("Expected avg_score 12.5, got %v", results["avg_score"])
+	if val, ok := results.Averages["avg_score"]; !ok || val != 12.5 {
+		t.Errorf("Expected avg_score 12.5, got %v", results.Averages["avg_score"])
 	}
 
 	// 3. Verify global min (5.0)
-	if val, ok := results["min_score"].(float64); !ok || val != 5.0 {
-		t.Errorf("Expected min_score 5.0, got %v", results["min_score"])
+	if val, ok := results.Sums["min_score"]; !ok || val != 5.0 {
+		t.Errorf("Expected min_score 5.0, got %v", results.Sums["min_score"])
 	}
 
 	// 4. Verify global max (20.0)
-	if val, ok := results["max_score"].(float64); !ok || val != 20.0 {
-		t.Errorf("Expected max_score 20.0, got %v", results["max_score"])
+	if val, ok := results.Sums["max_score"]; !ok || val != 20.0 {
+		t.Errorf("Expected max_score 20.0, got %v", results.Sums["max_score"])
 	}
 
 	// 5. Verify global count (4)
-	if val, ok := results["count_score"].(int64); !ok || val != 4 {
-		t.Errorf("Expected count_score 4, got %v", results["count_score"])
+	if val, ok := results.Sums["count_score"]; !ok || val != 4.0 {
+		t.Errorf("Expected count_score 4, got %v", results.Sums["count_score"])
 	}
 
 	// 6. Verify Group By Sum
-	groupBySum, ok := results["sum_by_category"].(map[string]any)
+	groupBySum, ok := results.GroupedData["sum_by_category"]
 	if !ok {
-		t.Fatalf("Expected sum_by_category to be a map, got %T", results["sum_by_category"])
+		t.Fatalf("Expected sum_by_category to be in GroupedData")
 	}
 
 	if val, ok := groupBySum["A"].(float64); !ok || val != 30.0 {
@@ -108,3 +108,4 @@ func TestAggregationRules(t *testing.T) {
 		t.Errorf("Expected sum for Category B to be 20.0, got %v", groupBySum["B"])
 	}
 }
+

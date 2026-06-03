@@ -71,7 +71,7 @@ func TestFullPipelineIntegration(t *testing.T) {
 			{Field: "height", Rule: "add_constant", Param: "2.0"}, // Normalizes by adding offset
 			{Field: "processed_stamp", Rule: "enrich_time"},
 		},
-		AggregationSpecs: []AggregationSpec{
+		AggregationTypes: []AggregationSpec{
 			{Field: "height", Func: "avg", Target: "average_height"},
 			{Field: "weight", Func: "sum", Target: "total_weight"},
 			{Field: "weight", Func: "count", Target: "record_count"},
@@ -80,7 +80,7 @@ func TestFullPipelineIntegration(t *testing.T) {
 			{Type: "json", Path: exportJsonPath},
 			{Type: "csv", Path: exportCsvPath},
 		},
-		Workers: WorkerConfig{
+		WorkerPoolSizes: WorkerConfig{
 			Validation:     3,
 			Transformation: 3,
 		},
@@ -134,7 +134,7 @@ func TestFullPipelineIntegration(t *testing.T) {
 
 	if len(errs) != 2 {
 		for _, e := range errs {
-			t.Logf("AUDIT ERROR: stage=%s, source=%s, record=%s, msg=%s", e.Stage, e.SourceID, e.RecordID, e.ErrorMessage)
+			t.Logf("AUDIT ERROR: stage=%s, raw_data=%s, msg=%s", e.Stage, e.RawData, e.ErrorMessage)
 		}
 		t.Errorf("Expected 2 job errors in SQLite audit, got %d", len(errs))
 	}
@@ -165,7 +165,7 @@ func TestFullPipelineIntegration(t *testing.T) {
 		t.Fatalf("Failed to fetch job results from DB: %v", err)
 	}
 
-	var aggs map[string]any
+	var aggs AggregatedResult
 	err = json.Unmarshal([]byte(results.ResultsJSON), &aggs)
 	if err != nil {
 		t.Fatalf("Failed to parse results JSON: %v", err)
@@ -179,16 +179,16 @@ func TestFullPipelineIntegration(t *testing.T) {
 	// Sum weight: 110 + 150 + 130 = 390.0
 	// Avg height: (62 + 72 + 67) / 3 = 67.0
 
-	if count, ok := aggs["record_count"].(float64); !ok || count != 3 {
-		t.Errorf("Expected record_count 3, got %v", aggs["record_count"])
+	if count, ok := aggs.Sums["record_count"]; !ok || count != 3 {
+		t.Errorf("Expected record_count 3, got %v", aggs.Sums["record_count"])
 	}
 
-	if sum, ok := aggs["total_weight"].(float64); !ok || sum != 390.0 {
-		t.Errorf("Expected total_weight 390.0, got %v", aggs["total_weight"])
+	if sum, ok := aggs.Sums["total_weight"]; !ok || sum != 390.0 {
+		t.Errorf("Expected total_weight 390.0, got %v", aggs.Sums["total_weight"])
 	}
 
-	if avg, ok := aggs["average_height"].(float64); !ok || avg != 67.0 {
-		t.Errorf("Expected average_height 67.0, got %v", aggs["average_height"])
+	if avg, ok := aggs.Averages["average_height"]; !ok || avg != 67.0 {
+		t.Errorf("Expected average_height 67.0, got %v", aggs.Averages["average_height"])
 	}
 }
 
@@ -228,7 +228,7 @@ func TestPipelineCancellation(t *testing.T) {
 				},
 			},
 		},
-		Workers: WorkerConfig{
+		WorkerPoolSizes: WorkerConfig{
 			Validation:     2,
 			Transformation: 2,
 		},
