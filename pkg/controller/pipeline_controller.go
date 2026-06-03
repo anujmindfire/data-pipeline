@@ -1,4 +1,11 @@
-package api
+/*
+Package controller implements the API layer controllers responsible for handling HTTP requests.
+PipelineController handles requests for creating, listing, cancelling, deleting, and fetching pipeline jobs,
+their current progress, processing errors, and aggregation results.
+It parses and validates request payloads, orchestrates actions using the service layer,
+queries the database via the repositories, and outputs JSON responses.
+*/
+package controller
 
 import (
 	"context"
@@ -7,73 +14,38 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"data-processing-pipeline/pkg/db"
-	"data-processing-pipeline/pkg/pipeline"
+	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/pkg/repository"
+	"data-processing-pipeline/pkg/service"
 
 	"github.com/google/uuid"
 )
 
-type Server struct {
-	db       *db.DB
-	addr     string
-	listener *http.Server
+type PipelineController struct {
+	pipelineService *service.PipelineService
+	jobRepo         *repository.PipelineJobRepository
+	errRepo         *repository.JobErrorRepository
+	resultRepo      *repository.JobResultsRepository
 }
 
-func NewServer(addr string, database *db.DB) *Server {
-	return &Server{
-		db:   database,
-		addr: addr,
+func NewPipelineController(
+	pipelineService *service.PipelineService,
+	jobRepo *repository.PipelineJobRepository,
+	errRepo *repository.JobErrorRepository,
+	resultRepo *repository.JobResultsRepository,
+) *PipelineController {
+	return &PipelineController{
+		pipelineService: pipelineService,
+		jobRepo:         jobRepo,
+		errRepo:         errRepo,
+		resultRepo:      resultRepo,
 	}
 }
 
-// Start boots up the HTTP server on the configured address.
-func (s *Server) Start() error {
-	mux := http.NewServeMux()
-
-	// CORS and Content-Type Middleware
-	handler := corsMiddleware(mux)
-
-	// Static SPA Dashboard routes
-	// Note: We serve static files from './web' directory
-	fs := http.FileServer(http.Dir("./web"))
-	mux.Handle("GET /", fs)
-
-	// API REST Endpoints
-	mux.HandleFunc("POST /api/v1/pipelines", s.handleCreatePipeline)
-	mux.HandleFunc("GET /api/v1/pipelines", s.handleListPipelines)
-	mux.HandleFunc("GET /api/v1/pipelines/{id}", s.handleGetPipeline)
-	mux.HandleFunc("GET /api/v1/pipelines/{id}/progress", s.handleGetProgress)
-	mux.HandleFunc("GET /api/v1/pipelines/{id}/results", s.handleGetResults)
-	mux.HandleFunc("GET /api/v1/pipelines/{id}/errors", s.handleGetErrors)
-	mux.HandleFunc("PATCH /api/v1/pipelines/{id}/cancel", s.handleCancelPipeline)
-	mux.HandleFunc("DELETE /api/v1/pipelines/{id}", s.handleDeletePipeline)
-	
-	// Prometheus metrics endpoint
-	mux.HandleFunc("GET /metrics", s.handleMetrics)
-
-	s.listener = &http.Server{
-		Addr:    s.addr,
-		Handler: handler,
-	}
-
-	fmt.Printf("[API] Server listening on http://%s\n", s.addr)
-	return s.listener.ListenAndServe()
-}
-
-func (s *Server) Shutdown(ctx context.Context) error {
-	if s.listener != nil {
-		return s.listener.Shutdown(ctx)
-	}
-	return nil
-}
-
-// ----------------------------------------------------
-// Handlers
-// ----------------------------------------------------
-
-func (s *Server) handleCreatePipeline(w http.ResponseWriter, r *http.Request) {
-	var spec pipeline.JobSpec
+func (c *PipelineController) CreatePipeline(w http.ResponseWriter, r *http.Request) {
+	var spec models.JobSpec
 	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Invalid request payload: "+err.Error())
 		return
@@ -105,16 +77,16 @@ func (s *Server) handleCreatePipeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set default workers if unset
-	if spec.Workers.Validation <= 0 {
-		spec.Workers.Validation = 3
+	if spec.WorkerPoolSizes.Validation <= 0 {
+		spec.WorkerPoolSizes.Validation = 3
 	}
-	if spec.Workers.Transformation <= 0 {
-		spec.Workers.Transformation = 3
+	if spec.WorkerPoolSizes.Transformation <= 0 {
+		spec.WorkerPoolSizes.Transformation = 3
 	}
 
 	// Automatically establish export targets if none specified
 	if len(spec.ExportTargets) == 0 {
-		spec.ExportTargets = []pipeline.ExportTargetSpec{
+		spec.ExportTargets = []models.ExportTargetSpec{
 			{
 				Type: "json",
 				Path: filepath.Join("data", "exports", spec.ID, "exported_records.json"),
@@ -125,7 +97,14 @@ func (s *Server) handleCreatePipeline(w http.ResponseWriter, r *http.Request) {
 	specJSON, _ := json.Marshal(spec)
 
 	// Save to DB in pending state
-	if err := s.db.CreateJob(spec.ID, spec.Name, string(specJSON)); err != nil {
+	job := &models.PipelineJob{
+		ID:        spec.ID,
+		Status:    string(models.StatusPending),
+		Config:    string(specJSON),
+		CreatedAt: time.Now(),
+	}
+
+	if err := c.jobRepo.Save(job); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to register job in database: "+err.Error())
 		return
 	}
@@ -133,7 +112,7 @@ func (s *Server) handleCreatePipeline(w http.ResponseWriter, r *http.Request) {
 	// Start pipeline concurrently in the background
 	go func() {
 		ctx := context.Background()
-		err := pipeline.RunPipeline(ctx, s.db, &spec)
+		err := c.pipelineService.RunPipeline(ctx, &spec)
 		if err != nil {
 			fmt.Printf("[API] Runtime pipeline error on job %s: %v\n", spec.ID, err)
 		}
@@ -144,12 +123,12 @@ func (s *Server) handleCreatePipeline(w http.ResponseWriter, r *http.Request) {
 		"message": "Pipeline job successfully created and queued",
 		"job_id":  spec.ID,
 		"name":    spec.Name,
-		"status":  pipeline.StatusPending,
+		"status":  models.StatusPending,
 	})
 }
 
-func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
-	dbJobs, err := s.db.ListJobs()
+func (c *PipelineController) ListPipelines(w http.ResponseWriter, r *http.Request) {
+	dbJobs, err := c.jobRepo.FindAll()
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to list jobs: "+err.Error())
 		return
@@ -157,75 +136,54 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 
 	// Merge active in-memory counters for real-time progress lists
 	type enrichedJob struct {
-		db.Job
-		ActiveProgress *pipeline.JobProgress `json:"active_progress,omitempty"`
+		models.PipelineJob
+		ActiveProgress *models.JobProgress `json:"active_progress,omitempty"`
 	}
 
 	enrichedList := make([]enrichedJob, len(dbJobs))
 	for i, dj := range dbJobs {
-		enrichedList[i] = enrichedJob{Job: dj}
-		if jp, ok := pipeline.GlobalRegistry.Get(dj.ID); ok {
-			enrichedList[i].ActiveProgress = jp
+		enrichedList[i] = enrichedJob{PipelineJob: dj}
+		if jp, ok := service.GlobalRegistry.Get(dj.ID); ok {
+			extProgress := jp.ToExternal()
+			enrichedList[i].ActiveProgress = &extProgress
 		}
 	}
 
 	_ = json.NewEncoder(w).Encode(enrichedList)
 }
 
-func (s *Server) handleGetPipeline(w http.ResponseWriter, r *http.Request) {
+func (c *PipelineController) GetPipeline(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
 		return
 	}
 
-	job, err := s.db.GetJob(id)
+	job, err := c.jobRepo.FindOne(id)
 	if err != nil {
-		writeJSONError(w, http.StatusNotFound, err.Error())
+		writeJSONError(w, http.StatusNotFound, "Job not found: "+err.Error())
 		return
 	}
 
 	_ = json.NewEncoder(w).Encode(job)
 }
 
-func (s *Server) handleGetProgress(w http.ResponseWriter, r *http.Request) {
+func (c *PipelineController) GetProgress(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
 		return
 	}
 
-	// 1. Check in-memory active registry first (provides extreme real-time speed)
-	if jp, ok := pipeline.GlobalRegistry.Get(id); ok {
-		jp.RLock()
-		defer jp.RUnlock()
-
-		percent := 0.0
-		if jp.TotalRecords > 0 {
-			percent = float64(jp.ProcessedRecords+jp.FailedRecords) * 100.0 / float64(jp.TotalRecords)
-			if percent > 100 {
-				percent = 100
-			}
-		}
-
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"job_id":             jp.JobID,
-			"name":               jp.Name,
-			"status":             jp.Status,
-			"percent_complete":   percent,
-			"total_records":      jp.TotalRecords,
-			"processed_records":  jp.ProcessedRecords,
-			"failed_records":     jp.FailedRecords,
-			"processing_rate":    jp.ProcessingRate,
-			"start_time":         jp.StartTime,
-			"end_time":           jp.EndTime,
-			"stage_latencies_ms": jp.StageLatencies,
-		})
+	// 1. Check in-memory active registry first
+	if jp, ok := service.GlobalRegistry.Get(id); ok {
+		extProgress := jp.ToExternal()
+		_ = json.NewEncoder(w).Encode(extProgress)
 		return
 	}
 
-	// 2. Fallback to SQLite DB if finished/archived
-	job, err := s.db.GetJob(id)
+	// 2. Fallback to PostgreSQL DB if finished/archived
+	job, err := c.jobRepo.FindOne(id)
 	if err != nil {
 		writeJSONError(w, http.StatusNotFound, "Pipeline progress not found: "+err.Error())
 		return
@@ -238,55 +196,63 @@ func (s *Server) handleGetProgress(w http.ResponseWriter, r *http.Request) {
 		percent = 100.0
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"job_id":             job.ID,
-		"status":             job.Status,
-		"percent_complete":   percent,
-		"total_records":      job.TotalRecords,
-		"processed_records":  job.ProcessedRecords,
-		"failed_records":     job.FailedRecords,
-		"processing_rate":    0.0, // Finished jobs don't have active rate
-		"start_time":         job.StartedAt,
-		"end_time":           job.CompletedAt,
-		"stage_latencies_ms": map[string]float64{"archived": 0.0},
+	pending := int64(job.TotalRecords - (job.ProcessedRecords + job.FailedRecords))
+	if pending < 0 {
+		pending = 0
+	}
+
+	_ = json.NewEncoder(w).Encode(models.JobProgress{
+		JobID:            job.ID,
+		RecordsProcessed: int64(job.ProcessedRecords),
+		RecordsPending:   pending,
+		ErrorCount:       int64(job.FailedRecords),
+		PercentComplete:  percent,
+		ProcessingRate:   0.0,
+		Name:             "Pipeline-" + job.ID,
+		Status:           job.Status,
+		TotalRecords:     int64(job.TotalRecords),
+		ProcessedRecords: int64(job.ProcessedRecords),
+		FailedRecords:    int64(job.FailedRecords),
+		StartTime:        job.CreatedAt,
+		EndTime:          job.CompletedAt,
 	})
 }
 
-func (s *Server) handleGetResults(w http.ResponseWriter, r *http.Request) {
+func (c *PipelineController) GetResults(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
 		return
 	}
 
-	results, err := s.db.GetJobResults(id)
+	results, err := c.resultRepo.FindOne(id)
 	if err != nil {
 		writeJSONError(w, http.StatusNotFound, "Job results not generated or not completed yet: "+err.Error())
 		return
 	}
 
-	var resultsMap map[string]any
-	_ = json.Unmarshal([]byte(results.ResultsJSON), &resultsMap)
+	var aggregatedResult models.AggregatedResult
+	_ = json.Unmarshal([]byte(results.ResultsJSON), &aggregatedResult)
 
 	var paths []string
 	_ = json.Unmarshal([]byte(results.ExportPaths), &paths)
 
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"job_id":      results.JobID,
-		"aggregates":  resultsMap,
+		"job_id":       results.JobID,
+		"aggregates":   aggregatedResult,
 		"export_files": paths,
-		"updated_at":  results.UpdatedAt,
+		"updated_at":   results.UpdatedAt,
 	})
 }
 
-func (s *Server) handleGetErrors(w http.ResponseWriter, r *http.Request) {
+func (c *PipelineController) GetErrors(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
 		return
 	}
 
-	errs, err := s.db.GetJobErrors(id)
+	errs, err := c.errRepo.FindByJobID(id)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to retrieve errors: "+err.Error())
 		return
@@ -295,20 +261,20 @@ func (s *Server) handleGetErrors(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(errs)
 }
 
-func (s *Server) handleCancelPipeline(w http.ResponseWriter, r *http.Request) {
+func (c *PipelineController) CancelPipeline(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
 		return
 	}
 
-	jp, ok := pipeline.GlobalRegistry.Get(id)
+	jp, ok := service.GlobalRegistry.Get(id)
 	if !ok {
-		// Fallback to SQLite DB if not running
-		job, err := s.db.GetJob(id)
+		// Fallback to DB if not running
+		job, err := c.jobRepo.FindOne(id)
 		if err == nil && (job.Status == "PENDING" || job.Status == "RUNNING") {
 			cancelledSummary := "Cancelled before active run"
-			_ = s.db.CompleteJob(id, string(pipeline.StatusCancelled), &cancelledSummary)
+			_ = c.jobRepo.Complete(id, string(models.StatusCancelled), &cancelledSummary)
 			_ = json.NewEncoder(w).Encode(map[string]string{"message": "Archived pending job marked cancelled in database"})
 			return
 		}
@@ -325,7 +291,7 @@ func (s *Server) handleCancelPipeline(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleDeletePipeline(w http.ResponseWriter, r *http.Request) {
+func (c *PipelineController) DeletePipeline(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
@@ -333,17 +299,17 @@ func (s *Server) handleDeletePipeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if running
-	if jp, ok := pipeline.GlobalRegistry.Get(id); ok {
+	if jp, ok := service.GlobalRegistry.Get(id); ok {
 		jp.Cancel()
 	}
 
 	// Delete from database
-	if err := s.db.DeleteJob(id); err != nil {
+	if err := c.jobRepo.Delete(id); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to delete job metadata: "+err.Error())
 		return
 	}
 
-	pipeline.GlobalRegistry.Delete(id)
+	service.GlobalRegistry.Delete(id)
 
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message": "Job run and database metadata successfully deleted",
@@ -351,10 +317,10 @@ func (s *Server) handleDeletePipeline(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+func (c *PipelineController) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 
-	jobs, err := s.db.ListJobs()
+	jobs, err := c.jobRepo.FindAll()
 	if err != nil {
 		http.Error(w, "Failed to fetch metrics: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -399,29 +365,6 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	out.WriteString(fmt.Sprintf("pipeline_records_ingested_total %d\n", inputTotal))
 
 	_, _ = w.Write([]byte(out.String()))
-}
-
-// ----------------------------------------------------
-// Helpers & Middleware
-// ----------------------------------------------------
-
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		if !strings.HasPrefix(r.URL.Path, "/metrics") && !strings.HasPrefix(r.URL.Path, "/") {
-			w.Header().Set("Content-Type", "application/json")
-		}
-
-		next.ServeHTTP(w, r)
-	})
 }
 
 func writeJSONError(w http.ResponseWriter, code int, msg string) {
