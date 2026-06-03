@@ -1,18 +1,45 @@
 version: '3.8'
 
 services:
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_DB=datapipeline
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=Admin1234
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d datapipeline"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   pipeline-service:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: antigravity-pipeline-service
+    container_name: pipeline-service
     ports:
       - "8080:8080"
     volumes:
-      # Mount the local data folder to persist SQLite databases and generated JSON/CSV exports
       - ./data:/app/data
-      # Mount local samples folder so custom datasets can be added and fed on the fly
       - ./samples:/app/samples
     environment:
       - PIPELINE_ADDR=0.0.0.0:8080
+      - DB_HOST=postgres-db
+      - DB_PORT=5432
+      - DB_DATABASE=datapipeline
+      - DB_USERS=postgres
+      - DB_PASSWORD=Admin1234
+    depends_on:
+      postgres-db:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  pgdata:
