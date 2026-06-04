@@ -1,0 +1,453 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Robust Concurrent Data Processing Pipeline API",
+    "description": "REST API for managing concurrent pipeline runs, tracking progress metrics, inspecting processing errors, and retrieving aggregation results.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local development server"
+    }
+  ],
+  "paths": {
+    "/api/v1/pipelines": {
+      "post": {
+        "summary": "Create and queue a new pipeline job",
+        "description": "Registers a new processing job with configurations, immediately returning its ID. The background worker pulls and executes it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobSpec"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Job successfully registered and queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "Pipeline job successfully created and queued" },
+                    "job_id": { "type": "string", "example": "covid-run-01" },
+                    "name": { "type": "string", "example": "COVID Global Ingestion" },
+                    "status": { "type": "string", "example": "PENDING" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid configuration payload"
+          }
+        }
+      },
+      "get": {
+        "summary": "List all pipeline jobs",
+        "description": "Retrieves the persistent state and active counters of all registered historical and running pipeline jobs.",
+        "responses": {
+          "200": {
+            "description": "A list of pipeline jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PipelineJobWithProgress"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{id}": {
+      "get": {
+        "summary": "Get pipeline job metadata",
+        "description": "Retrieves the database persistent metadata block of a job.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "The unique pipeline job ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job metadata block details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineJob"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{id}/progress": {
+      "get": {
+        "summary": "Get real-time job progress & metrics",
+        "description": "Exposes live statistics including processing rates (recs/sec), percent complete, counts, and stage latencies.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "The unique pipeline job ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dynamic progress telemetry response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobProgress"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job progress not found"
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{id}/results": {
+      "get": {
+        "summary": "Retrieve job aggregation results",
+        "description": "Fetches computed sums, averages, and group-by outcomes along with disk export paths.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "The unique pipeline job ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregation results dataset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResults"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Results not generated or job not completed"
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{id}/errors": {
+      "get": {
+        "summary": "Retrieve job processing errors",
+        "description": "Lists details of failed records, associated stage, and validation/transform failure cause.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "The unique pipeline job ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A list of processing error details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{id}/cancel": {
+      "patch": {
+        "summary": "Cancel a running pipeline job",
+        "description": "Dispatches cancellation signal to workers. If pending, marks it CANCELLED in database to prevent execution.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "The unique pipeline job ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancellation signal dispatched successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "Cancellation request successfully dispatched to running goroutines" },
+                    "job_id": { "type": "string", "example": "covid-run-01" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{id}": {
+      "delete": {
+        "summary": "Delete job history and metadata",
+        "description": "Aborts if running and clears all GORM database records associated with the pipeline ID.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "The unique pipeline job ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job run and database metadata deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "Job run and database metadata successfully deleted" },
+                    "job_id": { "type": "string", "example": "covid-run-01" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Get Prometheus Diagnostics Metrics",
+        "description": "Standard Prometheus text exporter exposing counters for pipeline statuses, processed inputs, and failures.",
+        "responses": {
+          "200": {
+            "description": "Prometheus text diagnostics",
+            "content": {
+              "text/plain": {
+                "schema": { "type": "string" },
+                "example": "# HELP pipeline_jobs_total Total number of pipeline jobs.\n# TYPE pipeline_jobs_total counter\npipeline_jobs_total{status=\"COMPLETED\"} 3\n\n# HELP pipeline_records_processed_total Total records successfully processed & exported.\n# TYPE pipeline_records_processed_total counter\npipeline_records_processed_total 1000"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SourceSpec": {
+        "type": "object",
+        "required": ["id", "type", "path"],
+        "properties": {
+          "id": { "type": "string", "example": "covid-latest" },
+          "type": { "type": "string", "example": "csv" },
+          "path": { "type": "string", "example": "samples/biometrics_sample.csv" },
+          "schema": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "example": { "location": "country", "new_cases": "cases" }
+          }
+        }
+      },
+      "ValidationRuleSpec": {
+        "type": "object",
+        "required": ["field", "rule"],
+        "properties": {
+          "field": { "type": "string", "example": "cases" },
+          "rule": { "type": "string", "example": "min" },
+          "param": { "type": "string", "example": "0" }
+        }
+      },
+      "TransformRuleSpec": {
+        "type": "object",
+        "required": ["field", "rule"],
+        "properties": {
+          "field": { "type": "string", "example": "cases" },
+          "rule": { "type": "string", "example": "cast" },
+          "param": { "type": "string", "example": "float" }
+        }
+      },
+      "AggregationSpec": {
+        "type": "object",
+        "required": ["field", "func", "target"],
+        "properties": {
+          "field": { "type": "string", "example": "cases" },
+          "func": { "type": "string", "example": "sum" },
+          "group_by": { "type": "string", "example": "country" },
+          "target": { "type": "string", "example": "total_cases" }
+        }
+      },
+      "ExportTargetSpec": {
+        "type": "object",
+        "required": ["type", "path"],
+        "properties": {
+          "type": { "type": "string", "example": "json" },
+          "path": { "type": "string", "example": "data/exports/covid_run.json" }
+        }
+      },
+      "WorkerConfig": {
+        "type": "object",
+        "properties": {
+          "validation": { "type": "integer", "example": 5 },
+          "transformation": { "type": "integer", "example": 5 }
+        }
+      },
+      "JobSpec": {
+        "type": "object",
+        "required": ["sources", "export_targets"],
+        "properties": {
+          "id": { "type": "string", "example": "covid-run-01" },
+          "name": { "type": "string", "example": "COVID Global Ingestion" },
+          "sources": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SourceSpec" }
+          },
+          "validation_rules": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ValidationRuleSpec" }
+          },
+          "transform_rules": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TransformRuleSpec" }
+          },
+          "aggregation_specs": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AggregationSpec" }
+          },
+          "export_targets": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ExportTargetSpec" }
+          },
+          "workers": { "$ref": "#/components/schemas/WorkerConfig" }
+        }
+      },
+      "PipelineJob": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "covid-run-01" },
+          "status": { "type": "string", "example": "COMPLETED" },
+          "config": { "type": "string", "description": "Raw JSON config spec" },
+          "total_records": { "type": "integer", "example": 254 },
+          "processed_records": { "type": "integer", "example": 250 },
+          "failed_records": { "type": "integer", "example": 4 },
+          "created_at": { "type": "string", "format": "date-time" },
+          "started_at": { "type": "string", "format": "date-time", "nullable": true },
+          "completed_at": { "type": "string", "format": "date-time", "nullable": true },
+          "error_summary": { "type": "string", "example": "Job finished with some validation failures", "nullable": true }
+        }
+      },
+      "JobProgress": {
+        "type": "object",
+        "properties": {
+          "job_id": { "type": "string", "example": "covid-run-01" },
+          "records_processed": { "type": "integer", "example": 250 },
+          "records_pending": { "type": "integer", "example": 0 },
+          "error_count": { "type": "integer", "example": 4 },
+          "percent_complete": { "type": "number", "example": 100.0 },
+          "processing_rate": { "type": "number", "example": 500.0 },
+          "name": { "type": "string", "example": "COVID Global Ingestion" },
+          "status": { "type": "string", "example": "COMPLETED" },
+          "total_records": { "type": "integer", "example": 254 },
+          "processed_records": { "type": "integer", "example": 250 },
+          "failed_records": { "type": "integer", "example": 4 },
+          "start_time": { "type": "string", "format": "date-time" },
+          "end_time": { "type": "string", "format": "date-time", "nullable": true },
+          "stage_latencies": {
+            "type": "object",
+            "additionalProperties": { "type": "number" },
+            "example": { "ingestion": 120, "validation": 80, "transformation": 100, "aggregation": 50, "export": 150 }
+          }
+        }
+      },
+      "PipelineJobWithProgress": {
+        "allOf": [
+          { "$ref": "#/components/schemas/PipelineJob" },
+          {
+            "type": "object",
+            "properties": {
+              "active_progress": {
+                "$ref": "#/components/schemas/JobProgress",
+                "nullable": true
+              }
+            }
+          }
+        ]
+      },
+      "JobResults": {
+        "type": "object",
+        "properties": {
+          "job_id": { "type": "string", "example": "covid-run-01" },
+          "aggregates": {
+            "type": "object",
+            "properties": {
+              "job_id": { "type": "string", "example": "covid-run-01" },
+              "total_count": { "type": "integer", "example": 250 },
+              "sums": { "type": "object", "additionalProperties": { "type": "number" }, "example": { "total_cases": 120000.0 } },
+              "averages": { "type": "object", "additionalProperties": { "type": "number" }, "example": { "average_cases": 480.0 } },
+              "grouped_data": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": { "type": "number" }
+                },
+                "example": { "cases_by_country": { "USA": 50000, "CANADA": 12000 } }
+              }
+            }
+          },
+          "export_files": {
+            "type": "array",
+            "items": { "type": "string" },
+            "example": ["data/exports/covid_run_01.json", "data/exports/covid_run_01.csv"]
+          },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "JobError": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "example": 12 },
+          "job_id": { "type": "string", "example": "covid-run-01" },
+          "stage": { "type": "string", "example": "validation" },
+          "raw_data": { "type": "string", "example": "{\"country\":\"\",\"cases\":\"15\"}" },
+          "error_message": { "type": "string", "example": "field 'country' is required but missing" },
+          "occurred_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

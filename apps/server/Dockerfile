@@ -29,6 +29,9 @@ COPY --from=builder /app/server .
 # Copy static frontend SPA files
 COPY --from=builder /app/apps/dashboard/web ./apps/dashboard/web
 
+# Copy Swagger spec file
+COPY --from=builder /app/swagger.json .
+
 # Pre-create data and samples directories
 RUN mkdir -p data samples
 

@@ -58,6 +58,12 @@ func RegisterRoutes(mux *http.ServeMux, ctrl *controller.PipelineController) htt
 	// Prometheus metrics endpoint
 	mux.HandleFunc(utils.RouteMetrics, ctrl.GetMetrics)
 
+	// Swagger specification endpoint
+	mux.HandleFunc("GET /swagger.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		http.ServeFile(w, r, "./swagger.json")
+	})
+
 	return corsMiddleware(mux)
 }
 
