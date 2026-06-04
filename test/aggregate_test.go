@@ -1,4 +1,4 @@
-package pipeline
+package test
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"data-processing-pipeline/packages/shared/models"
+	"data-processing-pipeline/packages/shared/pipeline"
 )
 
 func TestAggregationRules(t *testing.T) {
@@ -23,13 +24,13 @@ func TestAggregationRules(t *testing.T) {
 	transformedCh := make(chan models.Record, 5)
 	exportRecordsCh := make(chan models.Record, 5)
 	resultCh := make(chan models.AggregatedResult, 1)
-	progressCh := make(chan ProgressEvent, 10)
+	progressCh := make(chan pipeline.ProgressEvent, 10)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Start aggregation in background
-	StartAggregationStage(ctx, spec, transformedCh, exportRecordsCh, resultCh, progressCh)
+	pipeline.StartAggregationStage(ctx, spec, transformedCh, exportRecordsCh, resultCh, progressCh)
 
 	// Feed test records
 	records := []map[string]any{

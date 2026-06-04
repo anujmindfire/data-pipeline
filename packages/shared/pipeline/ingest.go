@@ -261,7 +261,7 @@ type ErrorEvent struct {
 }
 
 // Custom parser to aid basic conversions
-func parseFloat(val interface{}) (float64, error) {
+func ParseFloat(val interface{}) (float64, error) {
 	switch v := val.(type) {
 	case float64:
 		return v, nil

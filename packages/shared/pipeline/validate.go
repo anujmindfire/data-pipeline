@@ -23,7 +23,7 @@ func StartValidationStage(ctx context.Context, jobSpec *models.JobSpec, recordsC
 	}
 
 	// Pre-compile validation rules for maximum throughput
-	compiledValidators, compileErr := compileValidationRules(jobSpec.ValidationRules)
+	compiledValidators, compileErr := CompileValidationRules(jobSpec.ValidationRules)
 	if compileErr != nil {
 		// If rule compilation fails, report error and exit
 		errorCh <- ErrorEvent{
@@ -49,7 +49,7 @@ func StartValidationStage(ctx context.Context, jobSpec *models.JobSpec, recordsC
 						return
 					}
 
-					errs := runValidation(record, compiledValidators)
+					errs := RunValidation(record, compiledValidators)
 					if len(errs) > 0 {
 						// Record is invalid, send error events
 						record.IsValid = false
@@ -100,13 +100,13 @@ func StartValidationStage(ctx context.Context, jobSpec *models.JobSpec, recordsC
 	return done
 }
 
-type compiledValidator struct {
-	field string
-	check func(val interface{}) error
+type CompiledValidator struct {
+	Field string
+	Check func(val interface{}) error
 }
 
-func compileValidationRules(rules []models.ValidationRuleSpec) ([]compiledValidator, error) {
-	validators := make([]compiledValidator, 0, len(rules))
+func CompileValidationRules(rules []models.ValidationRuleSpec) ([]CompiledValidator, error) {
+	validators := make([]CompiledValidator, 0, len(rules))
 
 	for _, spec := range rules {
 		ruleType := spec.Rule
@@ -128,7 +128,7 @@ func compileValidationRules(rules []models.ValidationRuleSpec) ([]compiledValida
 			}
 
 		case "min":
-			minVal, err := parseFloat(param)
+			minVal, err := ParseFloat(param)
 			if err != nil {
 				return nil, fmt.Errorf("invalid parameter '%s' for rule 'min' on field '%s': %w", param, field, err)
 			}
@@ -136,7 +136,7 @@ func compileValidationRules(rules []models.ValidationRuleSpec) ([]compiledValida
 				if val == nil {
 					return nil // Assume optional if checked via required separately
 				}
-				fVal, err := parseFloat(val)
+				fVal, err := ParseFloat(val)
 				if err != nil {
 					return fmt.Errorf("field '%s' value %v cannot be parsed as numeric: %w", field, val, err)
 				}
@@ -147,7 +147,7 @@ func compileValidationRules(rules []models.ValidationRuleSpec) ([]compiledValida
 			}
 
 		case "max":
-			maxVal, err := parseFloat(param)
+			maxVal, err := ParseFloat(param)
 			if err != nil {
 				return nil, fmt.Errorf("invalid parameter '%s' for rule 'max' on field '%s': %w", param, field, err)
 			}
@@ -155,7 +155,7 @@ func compileValidationRules(rules []models.ValidationRuleSpec) ([]compiledValida
 				if val == nil {
 					return nil
 				}
-				fVal, err := parseFloat(val)
+				fVal, err := ParseFloat(val)
 				if err != nil {
 					return fmt.Errorf("field '%s' value %v cannot be parsed as numeric: %w", field, val, err)
 				}
@@ -174,7 +174,7 @@ func compileValidationRules(rules []models.ValidationRuleSpec) ([]compiledValida
 				case "int":
 					switch val.(type) {
 					case int, int64, float64, float32:
-						f, _ := parseFloat(val)
+						f, _ := ParseFloat(val)
 						if f == float64(int64(f)) {
 							return nil
 						}
@@ -190,7 +190,7 @@ func compileValidationRules(rules []models.ValidationRuleSpec) ([]compiledValida
 						return fmt.Errorf("field '%s' must be an integer", field)
 					}
 				case "float":
-					_, err := parseFloat(val)
+					_, err := ParseFloat(val)
 					if err != nil {
 						return fmt.Errorf("field '%s' is not a float: %w", field, err)
 					}
@@ -240,21 +240,21 @@ func compileValidationRules(rules []models.ValidationRuleSpec) ([]compiledValida
 			return nil, fmt.Errorf("unknown validation rule: %s", ruleType)
 		}
 
-		validators = append(validators, compiledValidator{
-			field: field,
-			check: check,
+		validators = append(validators, CompiledValidator{
+			Field: field,
+			Check: check,
 		})
 	}
 
 	return validators, nil
 }
 
-func runValidation(record models.Record, validators []compiledValidator) []string {
+func RunValidation(record models.Record, validators []CompiledValidator) []string {
 	var errs []string
 	for _, v := range validators {
 		// Fetch field value from ParsedData
-		val := record.ParsedData[v.field]
-		if err := v.check(val); err != nil {
+		val := record.ParsedData[v.Field]
+		if err := v.Check(val); err != nil {
 			errs = append(errs, err.Error())
 		}
 	}

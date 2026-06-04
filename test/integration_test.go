@@ -1,4 +1,4 @@
-package pipeline_test
+package test
 
 import (
 	"context"
@@ -8,17 +8,17 @@ import (
 	"testing"
 	"time"
 
+	"data-processing-pipeline/apps/server/service"
 	"data-processing-pipeline/packages/shared/config"
 	"data-processing-pipeline/packages/shared/models"
 	"data-processing-pipeline/packages/shared/repository"
-	"data-processing-pipeline/apps/server/service"
 
 	"github.com/joho/godotenv"
 )
 
 func TestFullPipelineIntegration(t *testing.T) {
 	// Load env file if available
-	_ = godotenv.Load("../../.env")
+	_ = godotenv.Load("../.env")
 
 	// Connect to GORM PostgreSQL Database
 	database, err := config.ConnectDatabase()
@@ -204,7 +204,7 @@ func TestFullPipelineIntegration(t *testing.T) {
 }
 
 func TestPipelineCancellation(t *testing.T) {
-	_ = godotenv.Load("../../.env")
+	_ = godotenv.Load("../.env")
 	database, err := config.ConnectDatabase()
 	if err != nil {
 		t.Skipf("Skipping cancellation test: PostgreSQL database is not reachable. Err: %v", err)

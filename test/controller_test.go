@@ -25,6 +25,8 @@ func TestControllerEndpointsAndSwaggerValidation(t *testing.T) {
 
 	// Clean database tables for testing
 	_ = database.Delete(&models.PipelineJob{}, "id LIKE ?", "test-ctrl-%")
+	_ = database.Delete(&models.JobError{}, "job_id LIKE ?", "test-ctrl-%")
+	_ = database.Delete(&models.JobResults{}, "job_id LIKE ?", "test-ctrl-%")
 
 	// Initialize repositories, service, controller
 	jobRepo := repository.NewPipelineJobRepository(database)
@@ -133,6 +135,27 @@ func TestControllerEndpointsAndSwaggerValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("ListPipelines - Returns job array matching Schema", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/pipelines", nil)
+		w := httptest.NewRecorder()
+
+		ctrl.ListPipelines(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200 OK, got %d", resp.StatusCode)
+		}
+
+		var list []map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+			t.Fatalf("Response is not valid JSON array: %v", err)
+		}
+
+		if len(list) == 0 {
+			t.Errorf("Expected at least one job in list, got 0")
+		}
+	})
+
 	t.Run("GetPipeline - Exists returns metadata matching Swagger schema", func(t *testing.T) {
 		jobID := "test-ctrl-01"
 		req := httptest.NewRequest("GET", "/api/v1/pipelines/"+jobID, nil)
@@ -163,6 +186,39 @@ func TestControllerEndpointsAndSwaggerValidation(t *testing.T) {
 		}
 
 		validateSwaggerSchema(t, w.Body.Bytes(), "JobProgress")
+	})
+
+	t.Run("GetResults - Missing returns 404 Not Found", func(t *testing.T) {
+		jobID := "test-ctrl-missing"
+		req := httptest.NewRequest("GET", "/api/v1/pipelines/"+jobID+"/results", nil)
+		req.SetPathValue("id", jobID)
+		w := httptest.NewRecorder()
+
+		ctrl.GetResults(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("Expected status 404 Not Found, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("GetErrors - Returns array of JobErrors", func(t *testing.T) {
+		jobID := "test-ctrl-01"
+		req := httptest.NewRequest("GET", "/api/v1/pipelines/"+jobID+"/errors", nil)
+		req.SetPathValue("id", jobID)
+		w := httptest.NewRecorder()
+
+		ctrl.GetErrors(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200 OK, got %d", resp.StatusCode)
+		}
+
+		var errs []models.JobError
+		if err := json.Unmarshal(w.Body.Bytes(), &errs); err != nil {
+			t.Errorf("Response is not valid array of JobErrors: %v", err)
+		}
 	})
 
 	t.Run("CancelPipeline - Dispatches cancel successfully", func(t *testing.T) {

@@ -21,7 +21,7 @@ func StartTransformationStage(ctx context.Context, jobSpec *models.JobSpec, vali
 	}
 
 	// Pre-compile transformation rules for fast performance
-	compiledTransformers, compileErr := compileTransformRules(jobSpec.TransformRules)
+	compiledTransformers, compileErr := CompileTransformRules(jobSpec.TransformRules)
 	if compileErr != nil {
 		errorCh <- ErrorEvent{
 			JobID:        jobSpec.ID,
@@ -47,7 +47,7 @@ func StartTransformationStage(ctx context.Context, jobSpec *models.JobSpec, vali
 					}
 
 					// Process transformation
-					if err := runTransformations(&record, compiledTransformers); err != nil {
+					if err := RunTransformations(&record, compiledTransformers); err != nil {
 						// Transformation failed (e.g. invalid type cast after check, although rare)
 						errorCh <- ErrorEvent{
 							JobID:        record.JobID,
@@ -88,13 +88,13 @@ func StartTransformationStage(ctx context.Context, jobSpec *models.JobSpec, vali
 	return done
 }
 
-type compiledTransformer struct {
-	field string
-	apply func(payload map[string]any) error
+type CompiledTransformer struct {
+	Field string
+	Apply func(payload map[string]any) error
 }
 
-func compileTransformRules(rules []models.TransformRuleSpec) ([]compiledTransformer, error) {
-	transformers := make([]compiledTransformer, 0, len(rules))
+func CompileTransformRules(rules []models.TransformRuleSpec) ([]CompiledTransformer, error) {
+	transformers := make([]CompiledTransformer, 0, len(rules))
 
 	for _, spec := range rules {
 		ruleType := spec.Rule
@@ -109,7 +109,7 @@ func compileTransformRules(rules []models.TransformRuleSpec) ([]compiledTransfor
 			case "float":
 				apply = func(payload map[string]any) error {
 					if val, ok := payload[field]; ok && val != nil {
-						f, err := parseFloat(val)
+						f, err := ParseFloat(val)
 						if err != nil {
 							return fmt.Errorf("transform cast failed for field '%s' with value '%v' to float: %w", field, val, err)
 						}
@@ -120,7 +120,7 @@ func compileTransformRules(rules []models.TransformRuleSpec) ([]compiledTransfor
 			case "int":
 				apply = func(payload map[string]any) error {
 					if val, ok := payload[field]; ok && val != nil {
-						f, err := parseFloat(val)
+						f, err := ParseFloat(val)
 						if err != nil {
 							return fmt.Errorf("transform cast failed for field '%s' with value '%v' to int: %w", field, val, err)
 						}
@@ -152,7 +152,7 @@ func compileTransformRules(rules []models.TransformRuleSpec) ([]compiledTransfor
 							}
 							payload[field] = b
 						case float64, float32, int, int64:
-							f, _ := parseFloat(val)
+							f, _ := ParseFloat(val)
 							payload[field] = f != 0
 						default:
 							payload[field] = false
@@ -202,13 +202,13 @@ func compileTransformRules(rules []models.TransformRuleSpec) ([]compiledTransfor
 			}
 
 		case "add_constant":
-			constVal, err := parseFloat(param)
+			constVal, err := ParseFloat(param)
 			if err != nil {
 				return nil, fmt.Errorf("invalid constant value '%s' for rule 'add_constant' on field '%s': %w", param, field, err)
 			}
 			apply = func(payload map[string]any) error {
 				if val, ok := payload[field]; ok && val != nil {
-					f, err := parseFloat(val)
+					f, err := ParseFloat(val)
 					if err != nil {
 						return fmt.Errorf("transform add_constant failed for field '%s' with non-numeric value '%v': %w", field, val, err)
 					}
@@ -221,18 +221,18 @@ func compileTransformRules(rules []models.TransformRuleSpec) ([]compiledTransfor
 			return nil, fmt.Errorf("unknown transformation rule: %s", ruleType)
 		}
 
-		transformers = append(transformers, compiledTransformer{
-			field: field,
-			apply: apply,
+		transformers = append(transformers, CompiledTransformer{
+			Field: field,
+			Apply: apply,
 		})
 	}
 
 	return transformers, nil
 }
 
-func runTransformations(record *models.Record, transformers []compiledTransformer) error {
+func RunTransformations(record *models.Record, transformers []CompiledTransformer) error {
 	for _, t := range transformers {
-		if err := t.apply(record.ParsedData); err != nil {
+		if err := t.Apply(record.ParsedData); err != nil {
 			return err
 		}
 	}

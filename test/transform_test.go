@@ -1,9 +1,10 @@
-package pipeline
+package test
 
 import (
 	"testing"
 
 	"data-processing-pipeline/packages/shared/models"
+	"data-processing-pipeline/packages/shared/pipeline"
 )
 
 func TestTransformationRules(t *testing.T) {
@@ -17,7 +18,7 @@ func TestTransformationRules(t *testing.T) {
 		{Field: "processed_at", Rule: "enrich_time"},
 	}
 
-	transformers, err := compileTransformRules(rules)
+	transformers, err := pipeline.CompileTransformRules(rules)
 	if err != nil {
 		t.Fatalf("Failed to compile transform rules: %v", err)
 	}
@@ -35,7 +36,7 @@ func TestTransformationRules(t *testing.T) {
 		ParsedData: payload,
 	}
 
-	err = runTransformations(&rec, transformers)
+	err = pipeline.RunTransformations(&rec, transformers)
 	if err != nil {
 		t.Fatalf("Transformations failed: %v", err)
 	}

@@ -1,9 +1,10 @@
-package pipeline
+package test
 
 import (
 	"testing"
 
 	"data-processing-pipeline/packages/shared/models"
+	"data-processing-pipeline/packages/shared/pipeline"
 )
 
 func TestValidationRules(t *testing.T) {
@@ -15,7 +16,7 @@ func TestValidationRules(t *testing.T) {
 		{Field: "postal_code", Rule: "regex", Param: "^[0-9]{5}$"},
 	}
 
-	validators, err := compileValidationRules(rules)
+	validators, err := pipeline.CompileValidationRules(rules)
 	if err != nil {
 		t.Fatalf("Failed to compile validation rules: %v", err)
 	}
@@ -84,7 +85,7 @@ func TestValidationRules(t *testing.T) {
 				RowID:      1,
 				ParsedData: tt.payload,
 			}
-			errs := runValidation(rec, validators)
+			errs := pipeline.RunValidation(rec, validators)
 			if tt.isValid && len(errs) > 0 {
 				t.Errorf("Expected record to be valid, but got errors: %v", errs)
 			}
