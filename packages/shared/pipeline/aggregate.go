@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"data-processing-pipeline/packages/shared/models"
+	"data-processing-pipeline/packages/shared/utils"
 )
 
 type Accumulator struct {
@@ -75,7 +76,7 @@ func StartAggregationStage(ctx context.Context, jobSpec *models.JobSpec, transfo
 						continue // Skip if field is missing or null
 					}
 
-					fVal, err := ParseFloat(val)
+					fVal, err := utils.ParseFloat(val)
 					if err != nil {
 						continue // Skip if value cannot be parsed to float
 					}

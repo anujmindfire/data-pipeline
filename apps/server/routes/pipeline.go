@@ -22,14 +22,9 @@ func getStaticDir() string {
 	}
 	candidates := []string{
 		"./apps/web",
-		"./apps/dashboard/web",
-		"./apps/dashboard",
 		"./web",
 		"../web",
-		"../dashboard/web",
-		"../dashboard",
 		"../../apps/web",
-		"../../apps/dashboard/web",
 	}
 	for _, c := range candidates {
 		if info, err := os.Stat(c); err == nil && info.IsDir() {

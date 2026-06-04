@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"data-processing-pipeline/packages/shared/models"
+	"data-processing-pipeline/packages/shared/utils"
 )
 
 // StartTransformationStage spawns worker goroutines to transform validated records in parallel.
@@ -109,7 +110,7 @@ func CompileTransformRules(rules []models.TransformRuleSpec) ([]CompiledTransfor
 			case "float":
 				apply = func(payload map[string]any) error {
 					if val, ok := payload[field]; ok && val != nil {
-						f, err := ParseFloat(val)
+						f, err := utils.ParseFloat(val)
 						if err != nil {
 							return fmt.Errorf("transform cast failed for field '%s' with value '%v' to float: %w", field, val, err)
 						}
@@ -120,7 +121,7 @@ func CompileTransformRules(rules []models.TransformRuleSpec) ([]CompiledTransfor
 			case "int":
 				apply = func(payload map[string]any) error {
 					if val, ok := payload[field]; ok && val != nil {
-						f, err := ParseFloat(val)
+						f, err := utils.ParseFloat(val)
 						if err != nil {
 							return fmt.Errorf("transform cast failed for field '%s' with value '%v' to int: %w", field, val, err)
 						}
@@ -152,7 +153,7 @@ func CompileTransformRules(rules []models.TransformRuleSpec) ([]CompiledTransfor
 							}
 							payload[field] = b
 						case float64, float32, int, int64:
-							f, _ := ParseFloat(val)
+							f, _ := utils.ParseFloat(val)
 							payload[field] = f != 0
 						default:
 							payload[field] = false
@@ -202,13 +203,13 @@ func CompileTransformRules(rules []models.TransformRuleSpec) ([]CompiledTransfor
 			}
 
 		case "add_constant":
-			constVal, err := ParseFloat(param)
+			constVal, err := utils.ParseFloat(param)
 			if err != nil {
 				return nil, fmt.Errorf("invalid constant value '%s' for rule 'add_constant' on field '%s': %w", param, field, err)
 			}
 			apply = func(payload map[string]any) error {
 				if val, ok := payload[field]; ok && val != nil {
-					f, err := ParseFloat(val)
+					f, err := utils.ParseFloat(val)
 					if err != nil {
 						return fmt.Errorf("transform add_constant failed for field '%s' with non-numeric value '%v': %w", field, val, err)
 					}

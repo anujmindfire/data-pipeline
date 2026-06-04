@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"data-processing-pipeline/packages/shared/models"
+	"data-processing-pipeline/packages/shared/utils"
 )
 
 const (
@@ -128,7 +129,7 @@ func CompileValidationRules(rules []models.ValidationRuleSpec) ([]CompiledValida
 			}
 
 		case "min":
-			minVal, err := ParseFloat(param)
+			minVal, err := utils.ParseFloat(param)
 			if err != nil {
 				return nil, fmt.Errorf("invalid parameter '%s' for rule 'min' on field '%s': %w", param, field, err)
 			}
@@ -136,7 +137,7 @@ func CompileValidationRules(rules []models.ValidationRuleSpec) ([]CompiledValida
 				if val == nil {
 					return nil // Assume optional if checked via required separately
 				}
-				fVal, err := ParseFloat(val)
+				fVal, err := utils.ParseFloat(val)
 				if err != nil {
 					return fmt.Errorf("field '%s' value %v cannot be parsed as numeric: %w", field, val, err)
 				}
@@ -147,7 +148,7 @@ func CompileValidationRules(rules []models.ValidationRuleSpec) ([]CompiledValida
 			}
 
 		case "max":
-			maxVal, err := ParseFloat(param)
+			maxVal, err := utils.ParseFloat(param)
 			if err != nil {
 				return nil, fmt.Errorf("invalid parameter '%s' for rule 'max' on field '%s': %w", param, field, err)
 			}
@@ -155,7 +156,7 @@ func CompileValidationRules(rules []models.ValidationRuleSpec) ([]CompiledValida
 				if val == nil {
 					return nil
 				}
-				fVal, err := ParseFloat(val)
+				fVal, err := utils.ParseFloat(val)
 				if err != nil {
 					return fmt.Errorf("field '%s' value %v cannot be parsed as numeric: %w", field, val, err)
 				}
@@ -174,7 +175,7 @@ func CompileValidationRules(rules []models.ValidationRuleSpec) ([]CompiledValida
 				case "int":
 					switch val.(type) {
 					case int, int64, float64, float32:
-						f, _ := ParseFloat(val)
+						f, _ := utils.ParseFloat(val)
 						if f == float64(int64(f)) {
 							return nil
 						}
@@ -190,7 +191,7 @@ func CompileValidationRules(rules []models.ValidationRuleSpec) ([]CompiledValida
 						return fmt.Errorf("field '%s' must be an integer", field)
 					}
 				case "float":
-					_, err := ParseFloat(val)
+					_, err := utils.ParseFloat(val)
 					if err != nil {
 						return fmt.Errorf("field '%s' is not a float: %w", field, err)
 					}

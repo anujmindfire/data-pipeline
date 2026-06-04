@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -258,26 +257,4 @@ type ErrorEvent struct {
 	Stage        string `json:"stage"`
 	RawData      string `json:"raw_data"`
 	ErrorMessage string `json:"error_message"`
-}
-
-// Custom parser to aid basic conversions
-func ParseFloat(val interface{}) (float64, error) {
-	switch v := val.(type) {
-	case float64:
-		return v, nil
-	case float32:
-		return float64(v), nil
-	case int:
-		return float64(v), nil
-	case int64:
-		return float64(v), nil
-	case string:
-		clean := strings.TrimSpace(v)
-		if clean == "" || clean == "null" || clean == "N/A" {
-			return 0, nil
-		}
-		return strconv.ParseFloat(clean, 64)
-	default:
-		return 0, fmt.Errorf("unable to convert type %T to float", val)
-	}
 }
