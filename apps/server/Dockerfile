@@ -27,7 +27,7 @@ WORKDIR /app
 COPY --from=builder /app/server .
 
 # Copy static frontend SPA files
-COPY --from=builder /app/apps/dashboard/web ./apps/dashboard/web
+COPY --from=builder /app/apps/web ./apps/web
 
 # Copy Swagger spec file
 COPY --from=builder /app/swagger.json .

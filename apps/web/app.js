@@ -1,4 +1,3 @@
-// --- CONFIGURATION PRESETS ---
 const PRESETS = {
     covid: {
         name: "COVID-19 Latest Summary",
@@ -101,7 +100,6 @@ const PRESETS = {
         transform_rules: [
             { field: "height_inches", rule: "cast", param: "float" },
             { field: "weight_pounds", rule: "cast", param: "float" },
-            // Add custom modifier rule just to test add_constant rule (e.g. adjust height calibration +10)
             { field: "height_inches", rule: "add_constant", param: "2.5" },
             { field: "ingestion_stamp", rule: "enrich_time" }
         ],

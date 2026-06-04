@@ -1,4 +1,4 @@
-package controller_test
+package test
 
 import (
 	"bytes"
@@ -33,8 +33,8 @@ func TestControllerEndpointsAndSwaggerValidation(t *testing.T) {
 	pipeService := service.NewPipelineService(jobRepo, errRepo, resultRepo)
 	ctrl := controller.NewPipelineController(pipeService, jobRepo, errRepo, resultRepo)
 
-	// 2. Load Swagger JSON for validation
-	swaggerBytes, err := os.ReadFile("../../../swagger.json")
+	// 2. Load Swagger JSON for validation (located at project root, one level up from test/)
+	swaggerBytes, err := os.ReadFile("../swagger.json")
 	if err != nil {
 		t.Fatalf("Failed to read swagger.json: %v", err)
 	}

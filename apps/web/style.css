@@ -1,4 +1,3 @@
-/* Global Variables & Cureated Color Palette */
 :root {
     --bg-dark: #0a0b10;
     --bg-card: rgba(22, 28, 45, 0.45);
@@ -6,27 +5,24 @@
     --border-color: rgba(255, 255, 255, 0.08);
     --border-hover: rgba(163, 112, 247, 0.3);
     
-    /* Curated harmonies */
-    --accent-primary: #a370f7;    /* Radiant Violet */
-    --accent-secondary: #3b82f6;  /* Sapphire Glow */
+    --accent-primary: #a370f7;
+    --accent-secondary: #3b82f6;
     --accent-gradient: linear-gradient(135deg, #a370f7 0%, #3b82f6 100%);
     
     --text-primary: #f3f4f6;
     --text-secondary: #9ca3af;
     --text-muted: #6b7280;
     
-    /* Status indicators */
-    --color-pending: #f59e0b;     /* Neon Amber */
-    --color-running: #10b981;     /* Emerald Pulse */
-    --color-completed: #3b82f6;   /* Deep Ocean */
-    --color-failed: #ef4444;      /* Cherry Flare */
-    --color-cancelled: #6b7280;   /* Muted Slate */
+    --color-pending: #f59e0b;
+    --color-running: #10b981;
+    --color-completed: #3b82f6;
+    --color-failed: #ef4444;
+    --color-cancelled: #6b7280;
     
     --shadow-glow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Reset & Core Body */
 * {
     margin: 0;
     padding: 0;
@@ -43,7 +39,6 @@ body {
     padding-bottom: 40px;
 }
 
-/* Stunning Ambient Glow Background */
 .glow-bg {
     position: fixed;
     top: -20%;
@@ -56,7 +51,6 @@ body {
     filter: blur(80px);
 }
 
-/* Header Component */
 .app-header {
     display: flex;
     justify-content: space-between;
@@ -151,7 +145,6 @@ body {
     border-color: rgba(255, 255, 255, 0.15);
 }
 
-/* Main Dashboard Grid Layout */
 .dashboard-grid {
     display: grid;
     grid-template-columns: 430px 1fr;

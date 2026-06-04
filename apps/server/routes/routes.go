@@ -21,9 +21,14 @@ func getStaticDir() string {
 		return dir
 	}
 	candidates := []string{
+		"./apps/web",
 		"./apps/dashboard/web",
+		"./apps/dashboard",
 		"./web",
+		"../web",
 		"../dashboard/web",
+		"../dashboard",
+		"../../apps/web",
 		"../../apps/dashboard/web",
 	}
 	for _, c := range candidates {
