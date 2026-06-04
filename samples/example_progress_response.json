@@ -1,0 +1,22 @@
+{
+  "job_id": "covid-run-01",
+  "records_processed": 250,
+  "records_pending": 0,
+  "error_count": 4,
+  "percent_complete": 100,
+  "processing_rate": 500.0,
+  "name": "COVID Global Ingestion",
+  "status": "COMPLETED",
+  "total_records": 254,
+  "processed_records": 250,
+  "failed_records": 4,
+  "start_time": "2026-06-04T12:00:00Z",
+  "end_time": "2026-06-04T12:00:00.5Z",
+  "stage_latencies": {
+    "ingestion": 120,
+    "validation": 80,
+    "transformation": 100,
+    "aggregation": 50,
+    "export": 150
+  }
+}
