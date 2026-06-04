@@ -1,6 +1,4 @@
 /*
-Package main is the entry point for starting the pipeline server application.
-
 It initializes the folders and configuration schemas, loads environment variables from the .env file,
 connects to PostgreSQL via GORM, sets up repositories, services, and controllers, registers routing endpoints,
 and boots up the HTTP dashboard server with listener channels for graceful shutdown signals.
@@ -94,7 +92,7 @@ func main() {
 		fmt.Printf("[Warning] Failed to stop HTTP Server cleanly: %v\n", err)
 	}
 
-	fmt.Println("[Main] Antigravity Pipeline Service successfully stopped. Goodbye!")
+	fmt.Println("[Main] Pipeline Service successfully stopped. Goodbye!")
 }
 
 func ensureBiometricSample() {

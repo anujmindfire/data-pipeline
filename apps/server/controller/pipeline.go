@@ -266,7 +266,10 @@ func (c *PipelineController) CancelPipeline(w http.ResponseWriter, r *http.Reque
 		if err == nil && (job.Status == "PENDING" || job.Status == "RUNNING") {
 			cancelledSummary := utils.MsgCancelArchived
 			_ = c.jobRepo.Complete(id, string(models.StatusCancelled), &cancelledSummary)
-			_ = json.NewEncoder(w).Encode(map[string]string{"message": utils.MsgCancelArchivedRes})
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"message": utils.MsgCancelArchivedRes,
+				"job_id":  id,
+			})
 			return
 		}
 		writeJSONError(w, http.StatusBadRequest, utils.MsgNotRunning)
