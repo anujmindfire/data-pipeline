@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
-	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/packages/shared/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )

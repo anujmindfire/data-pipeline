@@ -6,7 +6,7 @@ JobResultsRepository manages GORM persistent operations for finalized pipeline r
 package repository
 
 import (
-	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/packages/shared/models"
 	"gorm.io/gorm"
 )
 

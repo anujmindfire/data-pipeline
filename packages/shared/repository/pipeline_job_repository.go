@@ -7,7 +7,7 @@ It handles job inserts, state transitions (e.g. marking jobs as RUNNING or COMPL
 package repository
 
 import (
-	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/packages/shared/models"
 	"gorm.io/gorm"
 	"time"
 )
@@ -72,4 +72,13 @@ func (r *PipelineJobRepository) Complete(id string, status string, errorSummary 
 
 func (r *PipelineJobRepository) Delete(id string) error {
 	return r.db.Delete(&models.PipelineJob{}, "id = ?", id).Error
+}
+
+func (r *PipelineJobRepository) FindPendingJob() (*models.PipelineJob, error) {
+	var job models.PipelineJob
+	err := r.db.First(&job, "status = ?", "PENDING").Error
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
 }

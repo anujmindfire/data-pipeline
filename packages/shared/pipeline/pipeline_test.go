@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"data-processing-pipeline/pkg/config"
-	"data-processing-pipeline/pkg/models"
-	"data-processing-pipeline/pkg/repository"
-	"data-processing-pipeline/pkg/service"
+	"data-processing-pipeline/packages/shared/config"
+	"data-processing-pipeline/packages/shared/models"
+	"data-processing-pipeline/packages/shared/repository"
+	"data-processing-pipeline/apps/server/service"
 
 	"github.com/joho/godotenv"
 )

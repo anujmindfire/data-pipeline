@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/packages/shared/models"
 )
 
 type Accumulator struct {

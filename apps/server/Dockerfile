@@ -13,7 +13,7 @@ RUN go mod download
 COPY . .
 
 # Build a lightweight, statically-compiled binary (CGO disabled)
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o server ./cmd/server/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o server ./apps/server/main.go
 
 # Stage 2: Final minimal runner image
 FROM alpine:latest
@@ -26,10 +26,10 @@ WORKDIR /app
 # Copy compiled binary from builder
 COPY --from=builder /app/server .
 
-# Copy static frontend SPA files (required for dashboard serving)
-COPY --from=builder /app/web ./web
+# Copy static frontend SPA files
+COPY --from=builder /app/apps/dashboard/web ./apps/dashboard/web
 
-# Pre-create data and samples directories so they have correct permissions
+# Pre-create data and samples directories
 RUN mkdir -p data samples
 
 # Expose pipeline service port

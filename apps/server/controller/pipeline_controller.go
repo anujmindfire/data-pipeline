@@ -8,7 +8,6 @@ queries the database via the repositories, and outputs JSON responses.
 package controller
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,9 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"data-processing-pipeline/pkg/models"
-	"data-processing-pipeline/pkg/repository"
-	"data-processing-pipeline/pkg/service"
+	"data-processing-pipeline/apps/server/service"
+	"data-processing-pipeline/packages/shared/models"
+	"data-processing-pipeline/packages/shared/repository"
+	"data-processing-pipeline/packages/shared/utils"
 
 	"github.com/google/uuid"
 )
@@ -47,13 +47,13 @@ func NewPipelineController(
 func (c *PipelineController) CreatePipeline(w http.ResponseWriter, r *http.Request) {
 	var spec models.JobSpec
 	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Invalid request payload: "+err.Error())
+		writeJSONError(w, http.StatusBadRequest, utils.MsgInvalidPayload+err.Error())
 		return
 	}
 
 	// Validation checks on specifications
 	if len(spec.Sources) == 0 {
-		writeJSONError(w, http.StatusBadRequest, "At least one ingestion source is required")
+		writeJSONError(w, http.StatusBadRequest, utils.MsgSourceRequired)
 		return
 	}
 
@@ -71,7 +71,7 @@ func (c *PipelineController) CreatePipeline(w http.ResponseWriter, r *http.Reque
 			spec.Sources[i].ID = fmt.Sprintf("src-%d", i+1)
 		}
 		if src.Type == "" || src.Path == "" {
-			writeJSONError(w, http.StatusBadRequest, "Source type and path are required")
+			writeJSONError(w, http.StatusBadRequest, utils.MsgSourceFieldsRequired)
 			return
 		}
 	}
@@ -105,22 +105,13 @@ func (c *PipelineController) CreatePipeline(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := c.jobRepo.Save(job); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to register job in database: "+err.Error())
+		writeJSONError(w, http.StatusInternalServerError, utils.MsgDBRegisterFailed+err.Error())
 		return
 	}
 
-	// Start pipeline concurrently in the background
-	go func() {
-		ctx := context.Background()
-		err := c.pipelineService.RunPipeline(ctx, &spec)
-		if err != nil {
-			fmt.Printf("[API] Runtime pipeline error on job %s: %v\n", spec.ID, err)
-		}
-	}()
-
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"message": "Pipeline job successfully created and queued",
+		"message": utils.MsgCreateSuccess,
 		"job_id":  spec.ID,
 		"name":    spec.Name,
 		"status":  models.StatusPending,
@@ -130,7 +121,7 @@ func (c *PipelineController) CreatePipeline(w http.ResponseWriter, r *http.Reque
 func (c *PipelineController) ListPipelines(w http.ResponseWriter, r *http.Request) {
 	dbJobs, err := c.jobRepo.FindAll()
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to list jobs: "+err.Error())
+		writeJSONError(w, http.StatusInternalServerError, utils.MsgListJobsFailed+err.Error())
 		return
 	}
 
@@ -155,13 +146,13 @@ func (c *PipelineController) ListPipelines(w http.ResponseWriter, r *http.Reques
 func (c *PipelineController) GetPipeline(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
+		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
 		return
 	}
 
 	job, err := c.jobRepo.FindOne(id)
 	if err != nil {
-		writeJSONError(w, http.StatusNotFound, "Job not found: "+err.Error())
+		writeJSONError(w, http.StatusNotFound, utils.MsgJobNotFound+err.Error())
 		return
 	}
 
@@ -171,7 +162,7 @@ func (c *PipelineController) GetPipeline(w http.ResponseWriter, r *http.Request)
 func (c *PipelineController) GetProgress(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
+		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
 		return
 	}
 
@@ -185,7 +176,7 @@ func (c *PipelineController) GetProgress(w http.ResponseWriter, r *http.Request)
 	// 2. Fallback to PostgreSQL DB if finished/archived
 	job, err := c.jobRepo.FindOne(id)
 	if err != nil {
-		writeJSONError(w, http.StatusNotFound, "Pipeline progress not found: "+err.Error())
+		writeJSONError(w, http.StatusNotFound, utils.MsgProgressNotFound+err.Error())
 		return
 	}
 
@@ -221,13 +212,13 @@ func (c *PipelineController) GetProgress(w http.ResponseWriter, r *http.Request)
 func (c *PipelineController) GetResults(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
+		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
 		return
 	}
 
 	results, err := c.resultRepo.FindOne(id)
 	if err != nil {
-		writeJSONError(w, http.StatusNotFound, "Job results not generated or not completed yet: "+err.Error())
+		writeJSONError(w, http.StatusNotFound, utils.MsgResultsNotReady+err.Error())
 		return
 	}
 
@@ -248,13 +239,13 @@ func (c *PipelineController) GetResults(w http.ResponseWriter, r *http.Request) 
 func (c *PipelineController) GetErrors(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
+		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
 		return
 	}
 
 	errs, err := c.errRepo.FindByJobID(id)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to retrieve errors: "+err.Error())
+		writeJSONError(w, http.StatusInternalServerError, utils.MsgRetrieveErrorsFailed+err.Error())
 		return
 	}
 
@@ -264,7 +255,7 @@ func (c *PipelineController) GetErrors(w http.ResponseWriter, r *http.Request) {
 func (c *PipelineController) CancelPipeline(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
+		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
 		return
 	}
 
@@ -273,12 +264,12 @@ func (c *PipelineController) CancelPipeline(w http.ResponseWriter, r *http.Reque
 		// Fallback to DB if not running
 		job, err := c.jobRepo.FindOne(id)
 		if err == nil && (job.Status == "PENDING" || job.Status == "RUNNING") {
-			cancelledSummary := "Cancelled before active run"
+			cancelledSummary := utils.MsgCancelArchived
 			_ = c.jobRepo.Complete(id, string(models.StatusCancelled), &cancelledSummary)
-			_ = json.NewEncoder(w).Encode(map[string]string{"message": "Archived pending job marked cancelled in database"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": utils.MsgCancelArchivedRes})
 			return
 		}
-		writeJSONError(w, http.StatusBadRequest, "Pipeline is not actively running or registry expired")
+		writeJSONError(w, http.StatusBadRequest, utils.MsgNotRunning)
 		return
 	}
 
@@ -286,7 +277,7 @@ func (c *PipelineController) CancelPipeline(w http.ResponseWriter, r *http.Reque
 	jp.Cancel()
 
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"message": "Cancellation request successfully dispatched to running goroutines",
+		"message": utils.MsgCancelDispatched,
 		"job_id":  id,
 	})
 }
@@ -294,7 +285,7 @@ func (c *PipelineController) CancelPipeline(w http.ResponseWriter, r *http.Reque
 func (c *PipelineController) DeletePipeline(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, "Missing path parameter: id")
+		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
 		return
 	}
 
@@ -305,14 +296,14 @@ func (c *PipelineController) DeletePipeline(w http.ResponseWriter, r *http.Reque
 
 	// Delete from database
 	if err := c.jobRepo.Delete(id); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to delete job metadata: "+err.Error())
+		writeJSONError(w, http.StatusInternalServerError, utils.MsgDeleteFailed+err.Error())
 		return
 	}
 
 	service.GlobalRegistry.Delete(id)
 
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"message": "Job run and database metadata successfully deleted",
+		"message": utils.MsgDeleteSuccess,
 		"job_id":  id,
 	})
 }

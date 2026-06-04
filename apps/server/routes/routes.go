@@ -8,32 +8,55 @@ package routes
 
 import (
 	"net/http"
+	"os"
 	"strings"
-	"data-processing-pipeline/pkg/controller"
+
+	"data-processing-pipeline/apps/server/controller"
+	"data-processing-pipeline/packages/shared/utils"
 )
+
+// getStaticDir dynamically finds the path to the frontend assets.
+func getStaticDir() string {
+	if dir := os.Getenv("STATIC_DIR"); dir != "" {
+		return dir
+	}
+	candidates := []string{
+		"./apps/dashboard/web",
+		"./web",
+		"../dashboard/web",
+		"../../apps/dashboard/web",
+	}
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			return c
+		}
+	}
+	return "./web"
+}
 
 // RegisterRoutes registers all pipeline API endpoints and static SPA dashboard routes.
 func RegisterRoutes(mux *http.ServeMux, ctrl *controller.PipelineController) http.Handler {
 	// Static SPA Dashboard routes
-	fs := http.FileServer(http.Dir("./web"))
+	staticDir := getStaticDir()
+	fs := http.FileServer(http.Dir(staticDir))
 	mux.Handle("GET /", fs)
 	// Make sure sub-resources are also served
 	mux.Handle("GET /index.html", fs)
-	mux.Handle("GET /index.css", fs)
-	mux.Handle("GET /index.js", fs)
+	mux.Handle("GET /style.css", fs)
+	mux.Handle("GET /app.js", fs)
 
 	// API REST Endpoints
-	mux.HandleFunc("POST /api/v1/pipelines", ctrl.CreatePipeline)
-	mux.HandleFunc("GET /api/v1/pipelines", ctrl.ListPipelines)
-	mux.HandleFunc("GET /api/v1/pipelines/{id}", ctrl.GetPipeline)
-	mux.HandleFunc("GET /api/v1/pipelines/{id}/progress", ctrl.GetProgress)
-	mux.HandleFunc("GET /api/v1/pipelines/{id}/results", ctrl.GetResults)
-	mux.HandleFunc("GET /api/v1/pipelines/{id}/errors", ctrl.GetErrors)
-	mux.HandleFunc("PATCH /api/v1/pipelines/{id}/cancel", ctrl.CancelPipeline)
-	mux.HandleFunc("DELETE /api/v1/pipelines/{id}", ctrl.DeletePipeline)
+	mux.HandleFunc(utils.RouteCreatePipeline, ctrl.CreatePipeline)
+	mux.HandleFunc(utils.RouteListPipelines, ctrl.ListPipelines)
+	mux.HandleFunc(utils.RouteGetPipeline, ctrl.GetPipeline)
+	mux.HandleFunc(utils.RouteGetProgress, ctrl.GetProgress)
+	mux.HandleFunc(utils.RouteGetResults, ctrl.GetResults)
+	mux.HandleFunc(utils.RouteGetErrors, ctrl.GetErrors)
+	mux.HandleFunc(utils.RouteCancelPipeline, ctrl.CancelPipeline)
+	mux.HandleFunc(utils.RouteDeletePipeline, ctrl.DeletePipeline)
 	
 	// Prometheus metrics endpoint
-	mux.HandleFunc("GET /metrics", ctrl.GetMetrics)
+	mux.HandleFunc(utils.RouteMetrics, ctrl.GetMetrics)
 
 	return corsMiddleware(mux)
 }

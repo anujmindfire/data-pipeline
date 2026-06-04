@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/packages/shared/models"
 )
 
 // StartTransformationStage spawns worker goroutines to transform validated records in parallel.

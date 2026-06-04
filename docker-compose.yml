@@ -19,11 +19,11 @@ services:
       timeout: 5s
       retries: 5
 
-  pipeline-service:
+  pipeline-server:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: pipeline-service
+      dockerfile: apps/server/Dockerfile
+    container_name: pipeline-server
     ports:
       - "8080:8080"
     volumes:
@@ -31,6 +31,25 @@ services:
       - ./samples:/app/samples
     environment:
       - PIPELINE_ADDR=0.0.0.0:8080
+      - DB_HOST=postgres-db
+      - DB_PORT=5432
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERS=${DB_USERS}
+      - DB_PASSWORD=${DB_PASSWORD}
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  pipeline-worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: pipeline-worker
+    volumes:
+      - ./data:/app/data
+      - ./samples:/app/samples
+    environment:
       - DB_HOST=postgres-db
       - DB_PORT=5432
       - DB_DATABASE=${DB_DATABASE}

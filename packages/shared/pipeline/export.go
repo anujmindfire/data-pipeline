@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"data-processing-pipeline/pkg/models"
-	"data-processing-pipeline/pkg/repository"
+	"data-processing-pipeline/packages/shared/models"
+	"data-processing-pipeline/packages/shared/repository"
 )
 
 // StartExportStage handles streaming record exports and writing final aggregations.

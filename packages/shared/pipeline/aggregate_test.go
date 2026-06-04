@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/packages/shared/models"
 )
 
 func TestAggregationRules(t *testing.T) {

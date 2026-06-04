@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"data-processing-pipeline/pkg/models"
-	"data-processing-pipeline/pkg/pipeline"
-	"data-processing-pipeline/pkg/repository"
+	"data-processing-pipeline/packages/shared/models"
+	"data-processing-pipeline/packages/shared/pipeline"
+	"data-processing-pipeline/packages/shared/repository"
 )
 
 type PipelineService struct {
@@ -283,6 +283,7 @@ func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec)
 
 	// 4. Start Throttled Database Syncer
 	// Postgres updates progress metrics every 500ms to avoid I/O blocking
+	// It also polls the database to check if the job has been cancelled remotely
 	syncStop := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
@@ -296,6 +297,13 @@ func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec)
 				jp.mu.RUnlock()
 
 				_ = s.jobRepo.SetJobCounts(spec.ID, proc, fail)
+
+				// Check database for cancellation signal
+				if dbJob, err := s.jobRepo.FindOne(spec.ID); err == nil {
+					if dbJob.Status == string(models.StatusCancelled) {
+						cancel() // Trigger local context cancellation
+					}
+				}
 			case <-syncStop:
 				return
 			}

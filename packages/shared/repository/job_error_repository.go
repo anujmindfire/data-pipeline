@@ -7,7 +7,7 @@ by Job ID for monitoring audit trails.
 package repository
 
 import (
-	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/packages/shared/models"
 	"gorm.io/gorm"
 )
 

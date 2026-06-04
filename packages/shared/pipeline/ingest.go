@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/packages/shared/models"
 )
 
 // IngestSource orchestrates reading from a specific source configuration and sends unified Records.

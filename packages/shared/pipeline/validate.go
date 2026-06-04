@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"sync"
 
-	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/packages/shared/models"
 )
 
 const (

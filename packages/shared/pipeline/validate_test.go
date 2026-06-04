@@ -3,7 +3,7 @@ package pipeline
 import (
 	"testing"
 
-	"data-processing-pipeline/pkg/models"
+	"data-processing-pipeline/packages/shared/models"
 )
 
 func TestValidationRules(t *testing.T) {
