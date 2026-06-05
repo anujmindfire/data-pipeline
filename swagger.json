@@ -44,7 +44,24 @@
             }
           },
           "400": {
-            "description": "Invalid configuration payload"
+            "description": "Invalid configuration payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database registration failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -61,6 +78,16 @@
                   "items": {
                     "$ref": "#/components/schemas/PipelineJobWithProgress"
                   }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database query failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -92,8 +119,25 @@
               }
             }
           },
+          "400": {
+            "description": "Missing pipeline ID parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
-            "description": "Job not found"
+            "description": "Job metadata not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -122,8 +166,25 @@
               }
             }
           },
+          "400": {
+            "description": "Missing pipeline ID parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
-            "description": "Job progress not found"
+            "description": "Job progress telemetry not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -152,8 +213,25 @@
               }
             }
           },
+          "400": {
+            "description": "Missing pipeline ID parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
-            "description": "Results not generated or job not completed"
+            "description": "Results not ready or job not completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -181,6 +259,26 @@
                   "items": {
                     "$ref": "#/components/schemas/JobError"
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing pipeline ID parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -215,6 +313,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Missing pipeline ID or job is not actively running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -243,6 +351,26 @@
                     "message": { "type": "string", "example": "Job run and database metadata successfully deleted" },
                     "job_id": { "type": "string", "example": "covid-run-01" }
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing pipeline ID parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database deletion failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -446,6 +574,15 @@
           "raw_data": { "type": "string", "example": "{\"country\":\"\",\"cases\":\"15\"}" },
           "error_message": { "type": "string", "example": "field 'country' is required but missing" },
           "occurred_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Invalid request payload: unexpected EOF"
+          }
         }
       }
     }

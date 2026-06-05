@@ -44,153 +44,121 @@ The system utilizes standard Go channels and worker pools to achieve high throug
 
 ---
 
-## 2. Getting Started
+## 2. Directory Layout
+
+The application is organized as a Go Monorepo containing isolated microservices and shared utilities:
+
+```
+├── apps/
+│   ├── server/           # API Gateway HTTP REST Service
+│   │   ├── controller/   # API handlers & Swagger validators (pipeline.go)
+│   │   ├── service/      # Business logic execution tracker (pipeline.go)
+│   │   ├── routes/       # Endpoint routing & static file serving (pipeline.go)
+│   │   └── main.go       # Server gateway entry point
+│   ├── worker/           # Background Queue Poll Loop Worker Service
+│   │   └── main.go       # Polling runner executing sequential queued jobs
+│   └── web/              # Frontend visual SPA Dashboard (app.js, index.html, style.css)
+├── packages/
+│   └── shared/           # Core shared libraries
+│       ├── config/       # GORM PostgreSQL connection pool initializer
+│       ├── models/       # Shared database entities (PipelineJob, JobError, JobResults) & specifications
+│       ├── repository/   # GORM database data access objects
+│       ├── pipeline/     # Concurrency pipeline execution stages (Ingest, Validate, Transform, Aggregate, Export)
+│       └── utils/        # Common parsing functions (common.go) and API messages (constant.go)
+└── test/                 # Consolidated independent unit and integration tests
+```
+
+---
+
+## 3. Getting Started
 
 ### Local Setup (Using Go)
 
 #### Prerequisites
 - Go 1.22 or higher (successfully compiled and tested on Go 1.26.0)
+- PostgreSQL database running locally
 
-#### Installation
-Clone or navigate to the workspace directory:
+#### Running the API Gateway Server
+Start the HTTP REST API and SPA Dashboard server:
 ```bash
-cd /home/lenovo/Documents/data-processing-pipeline
+go run apps/server/main.go
 ```
+The server will:
+1. Ensure the `data/` and `samples/` folders exist.
+2. Auto-generate a biometric CSV dataset (`samples/biometrics_sample.csv`) for quick ingestion testing.
+3. Establish connection to the database.
+4. Listen on port `8080` serving the dynamic dashboard.
 
-#### Running the Server
-Start the REST API and SPA Dashboard server:
+#### Running the Background Worker
+In a separate terminal, launch the worker polling queue:
 ```bash
-go run cmd/server/main.go
+go run apps/worker/main.go
 ```
-The server will boot up and:
-1. Ensure the `data/` and `samples/` directories exist.
-2. Auto-generate a local biometric CSV dataset (`samples/biometrics_sample.csv`) for testing.
-3. Start the WAL-mode SQLite database.
-4. Launch the HTTP server on [http://localhost:8080](http://localhost:8080).
+The worker will:
+1. Connect to GORM PostgreSQL database.
+2. Continually scan for jobs marked with a `PENDING` status.
+3. Retrieve specifications, update status to `RUNNING`, and orchestrate parallel stage executions.
 
-### Containerized Setup (Using Docker)
+---
 
-#### Prerequisites
-- Docker and Docker Compose installed
+### Containerized Setup (Using Docker Compose)
 
-#### Running with Docker Compose (Recommended)
-You can boot up the entire backend service, database, and embedded dashboard with a single command:
+You can launch the database, API server gateway, background worker, and frontend dashboard with a single command:
 ```bash
 docker compose up -d --build
 ```
-This command builds the lightweight Go binary inside a multi-stage builder and mounts local folders. 
-- **Persistency**: The `./data` folder on your host machine is mapped to `/app/data` inside the container. This ensures that your SQLite database records and exported CSV/JSON files remain fully persistent on your host machine across builds or restarts.
-- **Custom Datasets**: The `./samples` folder on your host machine is mapped to `/app/samples`, allowing you to add custom CSV/JSON files locally on your host and run pipelines against them.
 
-To view logs:
+#### Port Mappings & Volumes
+*   **API Gateway Port**: Exposed on host port `8080`. Access the dashboard at **[http://localhost:8080](http://localhost:8080)**.
+*   **PostgreSQL Port (`5433:5432`)**: The database container port `5432` is mapped to host port **`5433`**. This allows you to run test suites locally on your host machine while interacting directly with the active Docker database!
+*   **Persistency**: Host folder `./data` is mapped to `/app/data` to persist run outputs.
+*   **Samples Mount**: Host folder `./samples` is mapped to `/app/samples`, allowing you to drop custom CSV/JSON files locally and ingest them via API specs.
+
+To shut down:
 ```bash
-docker compose logs -f
-```
-
-To stop the service:
-```bash
-docker compose down
-```
-
-#### Running with Plain Docker
-Alternatively, build and run the image directly:
-```bash
-# Build the image
-docker build -t pipeline-service .
-
-# Run the container mapping ports and folders
-docker run -d -p 8080:8080 -v $(pwd)/data:/app/data -v $(pwd)/samples:/app/samples --name pipeline-service pipeline-service
+docker compose down --remove-orphans
 ```
 
 ---
 
-## 3. Visual Monitoring Dashboard
+## 4. Visual Monitoring Dashboard
 
-Once the server is running, open your web browser and navigate to:
-👉 **[http://localhost:8080](http://localhost:8080)**
-
-The visual dashboard features:
-- **Presets Selector**: Load preset configurations (COVID-19 Latest CSV, Crypto markets JSON API, and Biometric height/weight CSV) automatically with one click.
-- **Interactive Editor**: Review and adjust specifications dynamically.
-- **Active Telemetry Grid**: Track live running states, success rates, processed counters, and rates in records/sec.
-- **Inspection Audits Modal**:
-  - **Latency Latches**: Shows a real-time bar chart of stage durations in milliseconds (utilizing Chart.js).
-  - **Aggregations Viewer**: Renders computed sums, averages, and group-by outcomes.
-  - **Failed Audits Logs**: Shows exact reasons why individual records failed validation or transformation.
-  - **Abort & Wipe Controls**: Stop active jobs or delete historical jobs.
+Navigate to **[http://localhost:8080](http://localhost:8080)** to access the visual SPA. It includes:
+*   **Preset Templates**: Instant launch triggers for COVID-19 CSV records, Crypto market JSON APIs, and biometrics height/weights datasets.
+*   **JSON Editor**: Raw JSON validation and dispatch control.
+*   **Active Telemetry Grid**: Visual metrics cards showing processing speeds (recs/s), failure rates, and duration.
+*   **Inspection Audits**:
+    *   *Latency Latches*: A Chart.js horizontal bar graph showing latency breakdowns across all processing stages.
+    *   *Aggregations*: Final computed sums, averages, and group-by category objects.
+    *   *Failed Audits*: Raw payload strings and error reasons for validation failures.
+    *   *Wipe/Abort*: Controls to terminate running jobs or erase registry history.
 
 ---
 
-## 4. REST API Endpoints
+## 5. REST API Endpoints
 
-All payload parameters are encoded in standard JSON formats.
+All payloads are parsed in JSON formats. Error responses return a unified `ErrorResponse` schema (`{"error": "message"}`).
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/api/v1/pipelines` | Start a new pipeline job run |
-| `GET` | `/api/v1/pipelines` | List all historical and active jobs |
-| `GET` | `/api/v1/pipelines/:id` | Get job metadata and completion summary |
-| `GET` | `/api/v1/pipelines/:id/progress` | Get real-time percent, counters, latencies, and rates |
-| `GET` | `/api/v1/pipelines/:id/results` | Get finalized aggregations and output file links |
-| `GET` | `/api/v1/pipelines/:id/errors` | Audit specific failures (stage, record, and cause) |
-| `PATCH` | `/api/v1/pipelines/:id/cancel` | Stop a running pipeline gracefully mid-stream |
-| `DELETE` | `/api/v1/pipelines/:id` | Delete job metadata and logs from registry |
-| `GET` | `/metrics` | Prometheus-compatible diagnostics exporter |
-
-### Example Dispatch Payload (POST `/api/v1/pipelines`)
-Submit a job configuration via `curl`:
-```bash
-curl -X POST http://localhost:8080/api/v1/pipelines \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "covid-run-01",
-    "name": "COVID Global Ingestion",
-    "sources": [
-      {
-        "id": "covid-latest",
-        "type": "csv",
-        "path": "https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/latest/owid-covid-latest.csv",
-        "schema": {
-          "location": "country",
-          "new_cases": "cases",
-          "new_deaths": "deaths"
-        }
-      }
-    ],
-    "validation_rules": [
-      { "field": "country", "rule": "required" },
-      { "field": "cases", "rule": "min", "param": "0" }
-    ],
-    "transform_rules": [
-      { "field": "country", "rule": "upper" },
-      { "field": "cases", "rule": "cast", "param": "float" },
-      { "field": "deaths", "rule": "cast", "param": "float" },
-      { "field": "processed_at", "rule": "enrich_time" }
-    ],
-    "aggregation_specs": [
-      { "field": "cases", "func": "sum", "target": "total_cases" },
-      { "field": "cases", "func": "max", "target": "max_single_country_cases" },
-      { "field": "cases", "func": "sum", "group_by": "country", "target": "cases_by_country" }
-    ],
-    "export_targets": [
-      { "type": "json", "path": "data/exports/covid_run_01.json" },
-      { "type": "csv", "path": "data/exports/covid_run_01.csv" }
-    ],
-    "workers": {
-      "validation": 8,
-      "transformation": 8
-    }
-  }'
-```
+| Method | Endpoint | Success Code | Error Codes | Description |
+| :--- | :--- | :---: | :---: | :--- |
+| `POST` | `/api/v1/pipelines` | `201 Created` | `400`, `500` | Start a new pipeline job |
+| `GET` | `/api/v1/pipelines` | `200 OK` | `500` | List all historical and active jobs |
+| `GET` | `/api/v1/pipelines/{id}` | `200 OK` | `400`, `404` | Get GORM database metadata block |
+| `GET` | `/api/v1/pipelines/{id}/progress` | `200 OK` | `400`, `404` | Get real-time status and telemetry |
+| `GET` | `/api/v1/pipelines/{id}/results` | `200 OK` | `400`, `404` | Get finalized aggregations and output file links |
+| `GET` | `/api/v1/pipelines/{id}/errors` | `200 OK` | `400`, `500` | Audit specific validation/transform failures |
+| `PATCH` | `/api/v1/pipelines/{id}/cancel` | `200 OK` | `400` | Abort a running pipeline gracefully mid-stream |
+| `DELETE` | `/api/v1/pipelines/{id}` | `200 OK` | `400`, `500` | Delete job metadata and error logs from registry |
+| `GET` | `/metrics` | `200 OK` | — | Prometheus diagnostics exporter |
 
 ---
 
-## 5. Running the Test Suite
+## 6. Running the Test Suite
 
-Our tests include comprehensive validation checks, transformations, aggregations, parallel worker counts, end-to-end integration runs, and graceful cancellations under the Go race detector.
+Our tests include validation checks, transformation casting, calculations, integration runs, and graceful cancellation flows.
 
-To run the complete test suite:
+To run the complete test suite with the race detector enabled:
 ```bash
 go test -v ./... -race
 ```
-All tests are 100% race-free and pass cleanly.
+*(All tests execute against the Docker PostgreSQL database on port `5433` and pass race-free.)*

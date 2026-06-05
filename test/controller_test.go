@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -268,6 +269,180 @@ func TestControllerEndpointsAndSwaggerValidation(t *testing.T) {
 		_, err := jobRepo.FindOne(jobID)
 		if err == nil {
 			t.Errorf("Expected error fetching deleted job, but found record")
+		}
+	})
+
+	t.Run("CreatePipeline - Spec with empty sources returns 400", func(t *testing.T) {
+		spec := models.JobSpec{
+			ID:      "test-ctrl-empty-src",
+			Name:    "Missing Sources Job",
+			Sources: []models.SourceSpec{},
+		}
+		bodyBytes, _ := json.Marshal(spec)
+		req := httptest.NewRequest("POST", "/api/v1/pipelines", bytes.NewBuffer(bodyBytes))
+		w := httptest.NewRecorder()
+
+		ctrl.CreatePipeline(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("Expected status 400 Bad Request, got %d", resp.StatusCode)
+		}
+		var respMap map[string]string
+		_ = json.Unmarshal(w.Body.Bytes(), &respMap)
+		if !strings.Contains(respMap["error"], "At least one ingestion source is required") {
+			t.Errorf("Expected source required error message, got: %s", respMap["error"])
+		}
+	})
+
+	t.Run("CreatePipeline - Spec with invalid source fields returns 400", func(t *testing.T) {
+		spec := models.JobSpec{
+			ID:   "test-ctrl-invalid-src",
+			Name: "Invalid Source Job",
+			Sources: []models.SourceSpec{
+				{
+					ID:   "src-1",
+					Type: "", // missing type
+					Path: "some/path.csv",
+				},
+			},
+		}
+		bodyBytes, _ := json.Marshal(spec)
+		req := httptest.NewRequest("POST", "/api/v1/pipelines", bytes.NewBuffer(bodyBytes))
+		w := httptest.NewRecorder()
+
+		ctrl.CreatePipeline(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("Expected status 400 Bad Request, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("GetPipeline - Non-existent job returns 404", func(t *testing.T) {
+		jobID := "test-ctrl-does-not-exist"
+		req := httptest.NewRequest("GET", "/api/v1/pipelines/"+jobID, nil)
+		req.SetPathValue("id", jobID)
+		w := httptest.NewRecorder()
+
+		ctrl.GetPipeline(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("Expected status 404 Not Found, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("GetProgress - Non-existent job returns 404", func(t *testing.T) {
+		jobID := "test-ctrl-does-not-exist"
+		req := httptest.NewRequest("GET", "/api/v1/pipelines/"+jobID+"/progress", nil)
+		req.SetPathValue("id", jobID)
+		w := httptest.NewRecorder()
+
+		ctrl.GetProgress(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("Expected status 404 Not Found, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("GetResults - Existing results returns 200 and matches Swagger schema", func(t *testing.T) {
+		jobID := "test-ctrl-results-exist"
+		
+		// Setup database mock results record
+		_ = database.Delete(&models.JobResults{}, "job_id = ?", jobID)
+		mockAgg := models.AggregatedResult{
+			JobID:      jobID,
+			TotalCount: 50,
+			Sums:       map[string]float64{"total_value": 500.5},
+			Averages:   map[string]float64{"average_value": 10.01},
+		}
+		aggBytes, _ := json.Marshal(mockAgg)
+		pathsBytes, _ := json.Marshal([]string{"data/exports/test-ctrl-results-exist.json"})
+		
+		mockResult := &models.JobResults{
+			JobID:       jobID,
+			ResultsJSON: string(aggBytes),
+			ExportPaths: string(pathsBytes),
+			UpdatedAt:   time.Now(),
+		}
+		_ = resultRepo.Save(mockResult)
+		defer func() {
+			_ = database.Delete(&models.JobResults{}, "job_id = ?", jobID)
+		}()
+
+		req := httptest.NewRequest("GET", "/api/v1/pipelines/"+jobID+"/results", nil)
+		req.SetPathValue("id", jobID)
+		w := httptest.NewRecorder()
+
+		ctrl.GetResults(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Expected status 200 OK, got %d", resp.StatusCode)
+		}
+
+		validateSwaggerSchema(t, w.Body.Bytes(), "JobResults")
+	})
+
+	t.Run("CancelPipeline - Job is not running or pending returns 400 Bad Request", func(t *testing.T) {
+		jobID := "test-ctrl-completed-job"
+		
+		// Save a job with status COMPLETED in the database
+		_ = database.Delete(&models.PipelineJob{}, "id = ?", jobID)
+		_ = jobRepo.Save(&models.PipelineJob{
+			ID:        jobID,
+			Status:    "COMPLETED",
+			CreatedAt: time.Now(),
+		})
+		defer func() {
+			_ = database.Delete(&models.PipelineJob{}, "id = ?", jobID)
+		}()
+
+		req := httptest.NewRequest("PATCH", "/api/v1/pipelines/"+jobID+"/cancel", nil)
+		req.SetPathValue("id", jobID)
+		w := httptest.NewRecorder()
+
+		ctrl.CancelPipeline(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("Expected status 400 Bad Request, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("CancelPipeline - Actively running job invokes cancel successfully", func(t *testing.T) {
+		jobID := "test-ctrl-running-job"
+		
+		// Register the job as running in the global registry with a custom cancellation function
+		cancelCalled := false
+		cancelFunc := func() {
+			cancelCalled = true
+		}
+		
+		jp := service.GlobalRegistry.Register(jobID, "Running Pipeline", cancelFunc)
+		jp.Lock()
+		jp.Status = models.StatusRunning
+		jp.Unlock()
+		
+		defer func() {
+			service.GlobalRegistry.Delete(jobID)
+		}()
+
+		req := httptest.NewRequest("PATCH", "/api/v1/pipelines/"+jobID+"/cancel", nil)
+		req.SetPathValue("id", jobID)
+		w := httptest.NewRecorder()
+
+		ctrl.CancelPipeline(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200 OK, got %d", resp.StatusCode)
+		}
+
+		if !cancelCalled {
+			t.Errorf("Expected cancellation handler function to be invoked")
 		}
 	})
 }

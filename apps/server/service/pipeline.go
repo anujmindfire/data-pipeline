@@ -345,6 +345,7 @@ func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec)
 	var errorSummary *string
 
 	// Wait for all stages to completely finish in order (race-free cascading shutdown)
+	ingestWg.Wait()
 	<-validationDone
 	<-transformationDone
 	<-aggregationDone
