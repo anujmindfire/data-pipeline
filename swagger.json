@@ -140,6 +140,55 @@
             }
           }
         }
+      },
+      "delete": {
+        "summary": "Delete job history and metadata",
+        "description": "Aborts if running and clears all GORM database records associated with the pipeline ID.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "The unique pipeline job ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job run and database metadata deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "Job run and database metadata successfully deleted" },
+                    "job_id": { "type": "string", "example": "covid-run-01" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing pipeline ID parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database deletion failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/pipelines/{id}/progress": {
@@ -316,57 +365,6 @@
           },
           "400": {
             "description": "Missing pipeline ID or job is not actively running",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/pipelines/{id}": {
-      "delete": {
-        "summary": "Delete job history and metadata",
-        "description": "Aborts if running and clears all GORM database records associated with the pipeline ID.",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string" },
-            "description": "The unique pipeline job ID"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Job run and database metadata deleted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": { "type": "string", "example": "Job run and database metadata successfully deleted" },
-                    "job_id": { "type": "string", "example": "covid-run-01" }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing pipeline ID parameter",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Database deletion failure",
             "content": {
               "application/json": {
                 "schema": {

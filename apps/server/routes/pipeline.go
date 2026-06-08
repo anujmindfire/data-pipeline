@@ -129,7 +129,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if !strings.HasPrefix(r.URL.Path, "/metrics") && !strings.HasPrefix(r.URL.Path, "/index") && r.URL.Path != "/" {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Content-Type", "application/json")
 		}
 
