@@ -59,12 +59,14 @@ func RegisterRoutes(mux *http.ServeMux, ctrl *controller.PipelineController) htt
 	// Swagger specification endpoint
 	mux.HandleFunc("GET /swagger.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 		http.ServeFile(w, r, "./swagger.json")
 	})
 
 	// Swagger UI HTML Documentation endpoint
 	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 		html := `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -99,7 +101,7 @@ func RegisterRoutes(mux *http.ServeMux, ctrl *controller.PipelineController) htt
     <script>
         window.onload = function() {
             SwaggerUIBundle({
-                url: "/swagger.json",
+                url: "/swagger.json?t=" + new Date().getTime(),
                 dom_id: '#swagger-ui',
                 deepLinking: true,
                 presets: [
