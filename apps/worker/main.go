@@ -1,6 +1,4 @@
 /*
-Package main is the entry point for the background pipeline worker microservice.
-
 It connects to the PostgreSQL database, registers repositories and services, and runs a polling loop
 to fetch and process queued "PENDING" jobs sequentially.
 */
@@ -24,9 +22,7 @@ import (
 )
 
 func main() {
-	fmt.Println("==================================================")
-	fmt.Println("      PIPELINE BACKGROUND WORKER SERVICE          ")
-	fmt.Println("==================================================")
+	fmt.Println("PIPELINE BACKGROUND WORKER SERVICE")
 
 	// 1. Load environment variables
 	if err := godotenv.Load(); err != nil {

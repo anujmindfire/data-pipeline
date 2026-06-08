@@ -1,6 +1,4 @@
 /*
-Package repository manages database CRUD transactions using GORM.
-
 PipelineJobRepository manages GORM database queries and updates against the PipelineJob schema.
 It handles job inserts, state transitions (e.g. marking jobs as RUNNING or COMPLETED), and progress counts.
 */

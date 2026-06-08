@@ -1,6 +1,4 @@
 /*
-Package routes manages the API endpoint routes and custom middleware declarations.
-
 RegisterRoutes attaches controller functions to the ServeMux for routing, configures static file directories
 for the dashboard SPA frontend application, and applies the CORS/Content-Type middleware handler.
 */

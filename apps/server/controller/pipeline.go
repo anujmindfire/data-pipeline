@@ -1,6 +1,5 @@
 /*
-Package controller implements the API layer controllers responsible for handling HTTP requests.
-PipelineController handles requests for creating, listing, cancelling, deleting, and fetching pipeline jobs,
+Pipeline handles requests for creating, listing, cancelling, deleting, and fetching pipeline jobs,
 their current progress, processing errors, and aggregation results.
 It parses and validates request payloads, orchestrates actions using the service layer,
 queries the database via the repositories, and outputs JSON responses.

@@ -6,9 +6,9 @@
     `Ingestion ➜ Validation ➜ Transformation ➜ Aggregation ➜ Export`.
     Stages are linked by buffered Go channels. Channel buffering is set to a moderate size (500) to act as a shock absorber, smoothing out ingestion spikes while preventing out-of-memory issues from deep backlogs.
 *   **Dynamic Unified Schema**: Records are mapped to a unified `map[string]any` structure wrapped in a structured `Record` object containing metadata (ID, source, validation state, timestamps). This schema mapping translates heterogeneous formats (CSV, JSON, REST APIs) into a consistent internal model.
-*   **Zero-CGO SQLite Persistence**: We selected the pure Go SQLite driver (`modernc.org/sqlite`). This completely avoids CGO requirements, ensuring seamless cross-compilation and easy setup. To handle concurrent writes without locking database files, we enabled **Write-Ahead Logging (WAL)** and configured a **busy_timeout** of 5 seconds.
-*   **Streaming File Exports**: To support large-scale files (e.g. multimillion-row COVID CSVs) without out-of-memory (OOM) risks, validation, transformation, and exports are fully streamed. Transformed records are written directly to disk (JSON Lines or CSV append) as they flow, avoiding the need to buffer massive arrays in memory.
-*   **Hybrid Memory-DB State Registry**: Real-time progress is tracked in a thread-safe, in-memory `Registry` that handles fast API polling `/progress` requests in microseconds. A throttled background routine syncs absolute counters to the SQLite database every 500ms, removing DB write bottlenecks.
+*   **GORM PostgreSQL Persistence**: We selected PostgreSQL (via `gorm.io/driver/postgres`) as our persistent store. This supports robust relational tracking, concurrent multi-worker job updates, and clean relational schemas for historical tracking, failed record audits, and aggregation results.
+*   **Streaming File Exports**: To support large-scale files (e.g., millions of records) without out-of-memory (OOM) risks, validation, transformation, and exports are fully streamed. Transformed records are written directly to disk (JSON Lines or CSV append) as they flow, avoiding the need to buffer massive arrays in memory.
+*   **Hybrid Memory-DB State Registry**: Real-time progress is tracked in a thread-safe, in-memory `Registry` that handles fast API polling `/progress` requests in microseconds. A throttled background routine syncs absolute counters to the PostgreSQL database every 500ms, removing DB write bottlenecks.
 
 ---
 
@@ -31,7 +31,7 @@ Ingestion Stage (Sync WG) ➜ recordsCh ➜ Validation (Worker Pool) ➜ validat
 
 | Choice Made | Advantages | Disadvantages / Trade-offs |
 | :--- | :--- | :--- |
-| **Pure Go SQLite Driver** | Seamless builds, zero CGO, easy setup, very fast for small to medium sets. | Lower raw database write throughput compared to standard C compiled CGO drivers. |
+| **GORM PostgreSQL DB** | Robust concurrency support, query efficiency, native ACID transactions, seamless container orchestration. | Requires running a database engine/container (unlike a self-contained embedded SQLite file). |
 | **Linear Pipeline Channels** | Strong decoupling of stages, excellent streamability, clear stages separation. | High channel-allocation overhead; memory copying across channels incurs minor CPU cost. |
-| **In-Memory Registry** | Incredibly low latency for API queries, zero database bottleneck on fast counters. | Active job states are lost if the server crashes mid-run; state is recovered only up to the last 500ms WAL sync. |
+| **In-Memory Registry** | Incredibly low latency for API queries, zero database bottleneck on fast counters. | Active job states are lost if the server crashes mid-run; state is recovered only up to the last 500ms Postgres sync. |
 | **Pre-compiled Closures** | Dynamic rules are loaded via JSON but executed with native speed (compiled regex/math). | Rule definitions are limited to simple predefined operators (min, max, trim, lowercase). |
