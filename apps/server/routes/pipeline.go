@@ -116,7 +116,6 @@ func RegisterRoutes(mux *http.ServeMux, ctrl *controller.PipelineController) htt
 		w.Write([]byte(html))
 	})
 
-
 	return corsMiddleware(mux)
 }
 

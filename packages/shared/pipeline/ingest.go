@@ -79,11 +79,16 @@ func IngestSource(ctx context.Context, jobID string, src models.SourceSpec, reco
 
 func parseCSV(ctx context.Context, jobID string, src models.SourceSpec, reader io.Reader, recordsCh chan<- models.Record, progressCh chan<- ProgressEvent, errorCh chan<- ErrorEvent) error {
 	csvReader := csv.NewReader(reader)
+	csvReader.LazyQuotes = true
 	
 	// Read headers
 	headers, err := csvReader.Read()
 	if err != nil {
 		return fmt.Errorf("failed to read CSV headers: %w", err)
+	}
+
+	for i, h := range headers {
+		headers[i] = strings.Trim(strings.TrimSpace(h), "\"")
 	}
 
 	lineNum := 1

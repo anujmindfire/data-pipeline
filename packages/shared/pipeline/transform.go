@@ -218,6 +218,7 @@ func CompileTransformRules(rules []models.TransformRuleSpec) ([]CompiledTransfor
 				return nil
 			}
 
+
 		default:
 			return nil, fmt.Errorf("unknown transformation rule: %s", ruleType)
 		}

@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -28,9 +27,6 @@ func main() {
 	// 1. Ensure required directory structures exist
 	_ = os.MkdirAll("data/exports", 0755)
 	_ = os.MkdirAll("samples", 0755)
-
-	// 2. Auto-generate sample biometric dataset if missing
-	ensureBiometricSample()
 
 	// 3. Load environment variables from .env file if present
 	if err := godotenv.Load(); err != nil {
@@ -93,33 +89,4 @@ func main() {
 	}
 
 	fmt.Println("[Main] Pipeline Service successfully stopped. Goodbye!")
-}
-
-func ensureBiometricSample() {
-	path := filepath.Join("samples", "biometrics_sample.csv")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		content := `Index,Height,Weight
-1,65.78,112.99
-2,71.52,136.49
-3,69.40,153.03
-4,68.22,142.34
-5,67.79,144.30
-6,68.70,123.30
-7,69.80,141.49
-8,70.01,136.46
-9,67.90,112.37
-10,66.78,120.67
-11,72.31,145.39
-12,68.90,131.02
-13,67.12,122.88
-14,70.44,142.34
-15,69.11,133.00
-`
-		err := os.WriteFile(path, []byte(content), 0644)
-		if err != nil {
-			fmt.Printf("[Error] Failed to generate biometrics sample CSV: %v\n", err)
-		} else {
-			fmt.Println("[Main] Generated local sample biometrics CSV in " + path)
-		}
-	}
 }

@@ -17,20 +17,8 @@ func ConnectDatabase() (*gorm.DB, error) {
 	dbname := os.Getenv("DB_DATABASE")
 	sslmode := os.Getenv("DB_SSLMODE")
 
-	if host == "" {
-		host = "localhost"
-	}
-	if port == "" {
-		port = "5432"
-	}
-	if user == "" {
-		user = "postgres"
-	}
-	if password == "" {
-		password = "postgres"
-	}
-	if dbname == "" {
-		dbname = "datapipeline"
+	if host == "" || port == "" || user == "" || password == "" || dbname == "" {
+		return nil, fmt.Errorf("missing required database environment variables (DB_HOST, DB_PORT, DB_USERS, DB_PASSWORD, DB_DATABASE)")
 	}
 	if sslmode == "" {
 		sslmode = "disable"

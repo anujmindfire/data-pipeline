@@ -1,6 +1,0 @@
-{
-  "message": "Pipeline job successfully created and queued",
-  "job_id": "covid-run-01",
-  "name": "COVID Global Ingestion",
-  "status": "PENDING"
-}
