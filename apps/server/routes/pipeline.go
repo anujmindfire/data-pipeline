@@ -62,6 +62,59 @@ func RegisterRoutes(mux *http.ServeMux, ctrl *controller.PipelineController) htt
 		http.ServeFile(w, r, "./swagger.json")
 	})
 
+	// Swagger UI HTML Documentation endpoint
+	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		html := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Processing Pipeline - API Docs</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+        }
+        /* Custom dark theme inversion to match visual dashboard */
+        .swagger-ui {
+            filter: invert(88%) hue-rotate(180deg);
+        }
+        .swagger-ui .topbar {
+            display: none;
+        }
+        .swagger-ui .info .title {
+            color: #ffffff;
+        }
+        .swagger-ui .info p, .swagger-ui .info li, .swagger-ui .info td {
+            color: #cccccc;
+        }
+    </style>
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"></script>
+    <script>
+        window.onload = function() {
+            SwaggerUIBundle({
+                url: "/swagger.json",
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis
+                ],
+                layout: "BaseLayout"
+            });
+        };
+    </script>
+</body>
+</html>`
+		w.Write([]byte(html))
+	})
+
+
 	return corsMiddleware(mux)
 }
 
