@@ -10,10 +10,11 @@ import (
 )
 
 type JobError struct {
-	ID           uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	JobID        string    `gorm:"index;type:varchar(50);not null" json:"job_id"`
-	Stage        string    `gorm:"type:varchar(50);not null" json:"stage"`
-	RawData      string    `gorm:"type:text" json:"raw_data"`
-	ErrorMessage string    `gorm:"type:text;not null" json:"error_message"`
-	OccurredAt   time.Time `json:"occurred_at"`
+	ID           uint         `gorm:"primaryKey;autoIncrement" json:"id"`
+	JobID        string       `gorm:"index;type:varchar(50);not null" json:"job_id"`
+	PipelineJob  *PipelineJob `gorm:"foreignKey:JobID;constraint:OnDelete:CASCADE;" json:"-"`
+	Stage        string       `gorm:"type:varchar(50);not null" json:"stage"`
+	RawData      string       `gorm:"type:text" json:"raw_data"`
+	ErrorMessage string       `gorm:"type:text;not null" json:"error_message"`
+	OccurredAt   time.Time    `json:"occurred_at"`
 }

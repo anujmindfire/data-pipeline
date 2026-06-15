@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 	"data-processing-pipeline/packages/shared/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -32,6 +33,15 @@ func ConnectDatabase() (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to connect to PostgreSQL: %w", err)
 	}
 
+	// Configure database connection pool parameters
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve sql.DB from GORM: %w", err)
+	}
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(100)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+
 	// Auto Migrate the database schemas
 	err = db.AutoMigrate(&models.PipelineJob{}, &models.JobError{}, &models.JobResults{})
 	if err != nil {
@@ -40,3 +50,4 @@ func ConnectDatabase() (*gorm.DB, error) {
 
 	return db, nil
 }
+

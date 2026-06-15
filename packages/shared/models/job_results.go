@@ -10,8 +10,9 @@ import (
 )
 
 type JobResults struct {
-	JobID       string    `gorm:"primaryKey;type:varchar(50)" json:"job_id"`
-	ResultsJSON string    `gorm:"type:text;not null" json:"results_json"`
-	ExportPaths string    `gorm:"type:text;not null" json:"export_paths"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	JobID       string       `gorm:"primaryKey;type:varchar(50)" json:"job_id"`
+	PipelineJob *PipelineJob `gorm:"foreignKey:JobID;constraint:OnDelete:CASCADE;" json:"-"`
+	ResultsJSON string       `gorm:"type:text;not null" json:"results_json"`
+	ExportPaths string       `gorm:"type:text;not null" json:"export_paths"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 }

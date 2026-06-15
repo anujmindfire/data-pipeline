@@ -351,7 +351,18 @@ func TestControllerEndpointsAndSwaggerValidation(t *testing.T) {
 		jobID := "test-ctrl-results-exist"
 		
 		// Setup database mock results record
+		_ = database.Delete(&models.PipelineJob{}, "id = ?", jobID)
 		_ = database.Delete(&models.JobResults{}, "job_id = ?", jobID)
+
+		mockJob := &models.PipelineJob{
+			ID:        jobID,
+			Status:    "COMPLETED",
+			CreatedAt: time.Now(),
+		}
+		if err := jobRepo.Save(mockJob); err != nil {
+			t.Fatalf("Failed to save mock job: %v", err)
+		}
+		
 		mockAgg := models.AggregatedResult{
 			JobID:      jobID,
 			TotalCount: 50,
@@ -367,8 +378,11 @@ func TestControllerEndpointsAndSwaggerValidation(t *testing.T) {
 			ExportPaths: string(pathsBytes),
 			UpdatedAt:   time.Now(),
 		}
-		_ = resultRepo.Save(mockResult)
+		if err := resultRepo.Save(mockResult); err != nil {
+			t.Fatalf("Failed to save mock result: %v", err)
+		}
 		defer func() {
+			_ = database.Delete(&models.PipelineJob{}, "id = ?", jobID)
 			_ = database.Delete(&models.JobResults{}, "job_id = ?", jobID)
 		}()
 
@@ -598,3 +612,94 @@ func TestNewRouteAndBodyValidations(t *testing.T) {
 		}
 	})
 }
+
+func TestDatabaseCascadingDeletes(t *testing.T) {
+	database, err := config.ConnectDatabase()
+	if err != nil {
+		t.Skip("Skipping cascade delete test: PostgreSQL database not reachable")
+	}
+
+	jobRepo := repository.NewPipelineJobRepository(database)
+	errRepo := repository.NewJobErrorRepository(database)
+	resultRepo := repository.NewJobResultsRepository(database)
+
+	jobID := "test-cascade-delete"
+
+	// Cleanup first
+	_ = database.Delete(&models.JobResults{}, "job_id = ?", jobID)
+	_ = database.Delete(&models.JobError{}, "job_id = ?", jobID)
+	_ = database.Delete(&models.PipelineJob{}, "id = ?", jobID)
+
+	// 1. Create pipeline job
+	job := &models.PipelineJob{
+		ID:        jobID,
+		Status:    "COMPLETED",
+		CreatedAt: time.Now(),
+	}
+	if err := jobRepo.Save(job); err != nil {
+		t.Fatalf("Failed to save pipeline job: %v", err)
+	}
+
+	// 2. Create job error
+	jobErr := &models.JobError{
+		JobID:        jobID,
+		Stage:        "Validation",
+		RawData:      "some-raw-data",
+		ErrorMessage: "test error message",
+		OccurredAt:   time.Now(),
+	}
+	if err := errRepo.Save(jobErr); err != nil {
+		t.Fatalf("Failed to save job error: %v", err)
+	}
+
+	// 3. Create job results
+	mockAgg := models.AggregatedResult{
+		JobID:      jobID,
+		TotalCount: 1,
+	}
+	aggBytes, _ := json.Marshal(mockAgg)
+	jobResult := &models.JobResults{
+		JobID:       jobID,
+		ResultsJSON: string(aggBytes),
+		ExportPaths: "[]",
+		UpdatedAt:   time.Now(),
+	}
+	if err := resultRepo.Save(jobResult); err != nil {
+		t.Fatalf("Failed to save job results: %v", err)
+	}
+
+	// Verify they exist
+	if _, err := jobRepo.FindOne(jobID); err != nil {
+		t.Fatalf("Expected job to exist: %v", err)
+	}
+	if errs, err := errRepo.FindByJobID(jobID); err != nil || len(errs) != 1 {
+		t.Fatalf("Expected 1 job error to exist: %v (found %d)", err, len(errs))
+	}
+	if _, err := resultRepo.FindOne(jobID); err != nil {
+		t.Fatalf("Expected job results to exist: %v", err)
+	}
+
+	// 4. Delete the parent job
+	if err := jobRepo.Delete(jobID); err != nil {
+		t.Fatalf("Failed to delete pipeline job: %v", err)
+	}
+
+	// 5. Verify cascade deletion
+	_, err = jobRepo.FindOne(jobID)
+	if err == nil {
+		t.Errorf("Expected pipeline job to be deleted, but it still exists")
+	}
+
+	errs, err := errRepo.FindByJobID(jobID)
+	if err != nil {
+		t.Errorf("Failed querying job errors: %v", err)
+	} else if len(errs) != 0 {
+		t.Errorf("Expected 0 job errors due to cascade delete, got %d", len(errs))
+	}
+
+	_, err = resultRepo.FindOne(jobID)
+	if err == nil {
+		t.Errorf("Expected job results to be deleted due to cascade delete, but it still exists")
+	}
+}
+
