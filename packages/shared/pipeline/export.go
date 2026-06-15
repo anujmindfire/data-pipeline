@@ -89,8 +89,20 @@ func StartExportStage(
 		// We spawn a helper to feed the consumer to avoid blocking the main thread
 		go func() {
 			defer close(consumerChan)
-			for record := range transformedCh {
-				consumerChan <- record
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case record, ok := <-transformedCh:
+					if !ok {
+						return
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case consumerChan <- record:
+					}
+				}
 			}
 		}()
 

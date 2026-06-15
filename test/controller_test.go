@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -830,5 +831,62 @@ func TestAuthMiddlewareAndRateLimiter(t *testing.T) {
 		}
 	})
 }
+
+func TestFindPendingJobConcurrent(t *testing.T) {
+	database, err := config.ConnectDatabase()
+	if err != nil {
+		t.Skip("Skipping concurrent FindPendingJob test: PostgreSQL database not reachable")
+	}
+
+	jobRepo := repository.NewPipelineJobRepository(database)
+
+	numJobs := 5
+	jobIDs := make([]string, numJobs)
+	for i := 0; i < numJobs; i++ {
+		jobIDs[i] = fmt.Sprintf("test-concurrent-poll-%d", i)
+		_ = database.Delete(&models.PipelineJob{}, "id = ?", jobIDs[i])
+		_ = jobRepo.Save(&models.PipelineJob{
+			ID:        jobIDs[i],
+			Status:    "PENDING",
+			CreatedAt: time.Now(),
+		})
+	}
+
+	defer func() {
+		for _, id := range jobIDs {
+			_ = database.Delete(&models.PipelineJob{}, "id = ?", id)
+		}
+	}()
+
+	claimedJobs := make(chan string, numJobs)
+	var wg sync.WaitGroup
+
+	for i := 0; i < numJobs; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			job, err := jobRepo.FindPendingJob()
+			if err == nil && job != nil {
+				claimedJobs <- job.ID
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(claimedJobs)
+
+	seen := make(map[string]bool)
+	for id := range claimedJobs {
+		if seen[id] {
+			t.Errorf("Job %s was double processed / claimed by multiple workers", id)
+		}
+		seen[id] = true
+	}
+
+	if len(seen) == 0 {
+		t.Errorf("Expected at least some jobs to be claimed, got 0")
+	}
+}
+
 
 

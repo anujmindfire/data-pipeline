@@ -7,6 +7,7 @@ package repository
 import (
 	"data-processing-pipeline/packages/shared/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"time"
 )
 
@@ -74,7 +75,22 @@ func (r *PipelineJobRepository) Delete(id string) error {
 
 func (r *PipelineJobRepository) FindPendingJob() (*models.PipelineJob, error) {
 	var job models.PipelineJob
-	err := r.db.First(&job, "status = ?", "PENDING").Error
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		err := tx.Clauses(clause.Locking{
+			Strength: "UPDATE",
+			Options:  "SKIP LOCKED",
+		}).First(&job, "status = ?", "PENDING").Error
+		if err != nil {
+			return err
+		}
+
+		// Atomically transition the claimed job to RUNNING
+		now := time.Now()
+		return tx.Model(&job).Updates(map[string]interface{}{
+			"status":     "RUNNING",
+			"started_at": now,
+		}).Error
+	})
 	if err != nil {
 		return nil, err
 	}
