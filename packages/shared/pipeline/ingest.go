@@ -92,6 +92,8 @@ func parseCSV(ctx context.Context, jobID string, src models.SourceSpec, reader i
 	}
 
 	lineNum := 1
+	rawData := make(map[string]any, len(headers))
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -110,8 +112,13 @@ func parseCSV(ctx context.Context, jobID string, src models.SourceSpec, reader i
 		}
 
 		lineNum++
+		
+		// Clear reused map to avoid reallocation
+		for k := range rawData {
+			delete(rawData, k)
+		}
+
 		// Construct record
-		rawData := make(map[string]any)
 		for i, val := range row {
 			if i < len(headers) {
 				rawData[headers[i]] = val
@@ -214,7 +221,7 @@ func parseJSON(ctx context.Context, jobID string, src models.SourceSpec, reader 
 
 // Maps raw map fields to target schema standard names, supporting direct copies for non-mapped fields.
 func mapRecord(raw map[string]any, mapping map[string]string) map[string]any {
-	payload := make(map[string]any)
+	payload := make(map[string]any, len(raw)+len(mapping))
 	// Base copy of all fields
 	for k, v := range raw {
 		payload[k] = v

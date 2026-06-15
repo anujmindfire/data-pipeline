@@ -12,17 +12,21 @@ import (
 	"data-processing-pipeline/packages/shared/repository"
 )
 
+type IPipelineService interface {
+	RunPipeline(ctx context.Context, spec *models.JobSpec) error
+}
+
 type PipelineService struct {
-	jobRepo    *repository.PipelineJobRepository
-	errRepo    *repository.JobErrorRepository
-	resultRepo *repository.JobResultsRepository
+	jobRepo    repository.IPipelineJobRepository
+	errRepo    repository.IJobErrorRepository
+	resultRepo repository.IJobResultsRepository
 }
 
 func NewPipelineService(
-	jobRepo *repository.PipelineJobRepository,
-	errRepo *repository.JobErrorRepository,
-	resultRepo *repository.JobResultsRepository,
-) *PipelineService {
+	jobRepo repository.IPipelineJobRepository,
+	errRepo repository.IJobErrorRepository,
+	resultRepo repository.IJobResultsRepository,
+) IPipelineService {
 	return &PipelineService{
 		jobRepo:    jobRepo,
 		errRepo:    errRepo,
@@ -207,13 +211,15 @@ func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec)
 		defer bgWg.Done()
 		for errEv := range errorCh {
 			// Write error to DB via Repository
-			_ = s.errRepo.Save(&models.JobError{
+			if err := s.errRepo.Save(&models.JobError{
 				JobID:        spec.ID,
 				Stage:        errEv.Stage,
 				RawData:      errEv.RawData,
 				ErrorMessage: errEv.ErrorMessage,
 				OccurredAt:   time.Now(),
-			})
+			}); err != nil {
+				fmt.Printf("[Pipeline] Error saving job error: %v\n", err)
+			}
 			
 			// Increment failed count if it is a record-level error
 			if errEv.Stage != "export" && !strings.Contains(errEv.RawData, "setup") && !strings.Contains(errEv.RawData, "init") {
@@ -260,7 +266,9 @@ func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec)
 				if remainingSources == 0 {
 					// All ingestion done, we know the exact total input size
 					jp.TotalRecords = totalIngested
-					_ = s.jobRepo.SetTotalRecords(spec.ID, int(totalIngested))
+					if err := s.jobRepo.SetTotalRecords(spec.ID, int(totalIngested)); err != nil {
+						fmt.Printf("[Pipeline] Error setting total records: %v\n", err)
+					}
 				}
 			}
 
@@ -296,7 +304,9 @@ func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec)
 				fail := int(jp.FailedRecords)
 				jp.mu.RUnlock()
 
-				_ = s.jobRepo.SetJobCounts(spec.ID, proc, fail)
+				if err := s.jobRepo.SetJobCounts(spec.ID, proc, fail); err != nil {
+					fmt.Printf("[Pipeline] Error syncing job counts: %v\n", err)
+				}
 
 				// Check database for cancellation signal
 				if dbJob, err := s.jobRepo.FindOne(spec.ID); err == nil {
@@ -401,6 +411,8 @@ func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec)
 	}
 
 	// Force absolute counter sync
-	_ = s.jobRepo.SetJobCounts(spec.ID, proc, fail)
+	if err := s.jobRepo.SetJobCounts(spec.ID, proc, fail); err != nil {
+		fmt.Printf("[Pipeline] Error syncing final job counts: %v\n", err)
+	}
 	return nil
 }

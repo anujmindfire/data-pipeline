@@ -93,17 +93,17 @@ func getAndValidateVersion(r *http.Request) (string, error) {
 }
 
 type PipelineController struct {
-	pipelineService *service.PipelineService
-	jobRepo         *repository.PipelineJobRepository
-	errRepo         *repository.JobErrorRepository
-	resultRepo      *repository.JobResultsRepository
+	pipelineService service.IPipelineService
+	jobRepo         repository.IPipelineJobRepository
+	errRepo         repository.IJobErrorRepository
+	resultRepo      repository.IJobResultsRepository
 }
 
 func NewPipelineController(
-	pipelineService *service.PipelineService,
-	jobRepo *repository.PipelineJobRepository,
-	errRepo *repository.JobErrorRepository,
-	resultRepo *repository.JobResultsRepository,
+	pipelineService service.IPipelineService,
+	jobRepo repository.IPipelineJobRepository,
+	errRepo repository.IJobErrorRepository,
+	resultRepo repository.IJobResultsRepository,
 ) *PipelineController {
 	return &PipelineController{
 		pipelineService: pipelineService,

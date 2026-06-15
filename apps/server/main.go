@@ -25,8 +25,14 @@ import (
 
 func main() {
 	// 1. Ensure required directory structures exist
-	_ = os.MkdirAll("data/exports", 0755)
-	_ = os.MkdirAll("samples", 0755)
+	if err := os.MkdirAll("data/exports", 0755); err != nil {
+		fmt.Printf("[CRITICAL] Failed to create data/exports directory: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll("samples", 0755); err != nil {
+		fmt.Printf("[CRITICAL] Failed to create samples directory: %v\n", err)
+		os.Exit(1)
+	}
 
 	// 3. Load environment variables from .env file if present
 	if err := godotenv.Load(); err != nil {

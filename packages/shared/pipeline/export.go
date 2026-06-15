@@ -18,7 +18,7 @@ import (
 func StartExportStage(
 	ctx context.Context,
 	jobSpec *models.JobSpec,
-	resultRepo *repository.JobResultsRepository,
+	resultRepo repository.IJobResultsRepository,
 	transformedCh <-chan models.Record,
 	resultCh <-chan models.AggregatedResult,
 	errorCh chan<- ErrorEvent,
@@ -55,7 +55,10 @@ func StartExportStage(
 				jsonFile = file
 				exportedPaths = append(exportedPaths, target.Path)
 				// Write starting bracket for JSON array
-				_, _ = jsonFile.WriteString("[\n")
+				if _, err := jsonFile.WriteString("[\n"); err != nil {
+					sendExportError(jobSpec.ID, "write_json_array_start", err, errorCh)
+					return
+				}
 
 			case "csv":
 				file, err := os.Create(target.Path)
@@ -72,7 +75,9 @@ func StartExportStage(
 		// Close file streams at completion
 		defer func() {
 			if jsonFile != nil {
-				_, _ = jsonFile.WriteString("\n]")
+				if _, err := jsonFile.WriteString("\n]"); err != nil {
+					sendExportError(jobSpec.ID, "write_json_array_end", err, errorCh)
+				}
 				jsonFile.Close()
 			}
 			if csvWriter != nil {
@@ -124,9 +129,13 @@ func StartExportStage(
 						sendExportError(jobSpec.ID, "marshal_json_record", err, errorCh)
 					} else {
 						if recordCount > 1 {
-							_, _ = jsonFile.WriteString(",\n")
+							if _, err := jsonFile.WriteString(",\n"); err != nil {
+								sendExportError(jobSpec.ID, "write_json_comma", err, errorCh)
+							}
 						}
-						_, _ = jsonFile.Write(data)
+						if _, err := jsonFile.Write(data); err != nil {
+							sendExportError(jobSpec.ID, "write_json_record", err, errorCh)
+						}
 					}
 				}
 
