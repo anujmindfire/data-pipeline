@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"data-processing-pipeline/packages/shared/logger"
 	"data-processing-pipeline/packages/shared/models"
 )
 
@@ -33,21 +34,9 @@ func IngestSource(ctx context.Context, jobID string, src models.SourceSpec, reco
 	isHTTP := strings.HasPrefix(src.Path, "http://") || strings.HasPrefix(src.Path, "https://")
 
 	if isHTTP {
-		req, errReq := http.NewRequestWithContext(ctx, "GET", src.Path, nil)
-		if errReq != nil {
-			sendIngestError(jobID, src.ID, "init_request", errReq, errorCh)
-			return
-		}
-
-		resp, errResp := http.DefaultClient.Do(req)
-		if errResp != nil {
-			sendIngestError(jobID, src.ID, "fetch_http", errResp, errorCh)
-			return
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			sendIngestError(jobID, src.ID, "fetch_http", fmt.Errorf("bad status code: %d", resp.StatusCode), errorCh)
+		resp, errFetch := fetchWithRetry(ctx, src.Path)
+		if errFetch != nil {
+			sendIngestError(jobID, src.ID, "fetch_http", errFetch, errorCh)
 			return
 		}
 		reader = resp.Body
@@ -75,6 +64,55 @@ func IngestSource(ctx context.Context, jobID string, src models.SourceSpec, reco
 	if err != nil {
 		sendIngestError(jobID, src.ID, "parsing", err, errorCh)
 	}
+}
+
+// fetchWithRetry performs an HTTP GET with up to 3 retries and exponential backoff (1s, 2s, 4s).
+// Network errors and 5xx server errors are retried; 4xx client errors fail immediately.
+func fetchWithRetry(ctx context.Context, rawURL string) (*http.Response, error) {
+	const maxAttempts = 4
+	backoff := time.Second
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			lastErr = err
+			logger.Warn(ctx, "HTTP fetch failed, will retry",
+				"url", rawURL, "attempt", attempt, "max_attempts", maxAttempts, "error", err)
+			continue
+		}
+
+		if resp.StatusCode >= 500 {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("server error: %d", resp.StatusCode)
+			logger.Warn(ctx, "HTTP fetch server error, will retry",
+				"url", rawURL, "attempt", attempt, "status", resp.StatusCode)
+			continue
+		}
+
+		if resp.StatusCode >= 400 {
+			resp.Body.Close()
+			return nil, fmt.Errorf("bad status code: %d", resp.StatusCode)
+		}
+
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("all %d fetch attempts failed: %w", maxAttempts, lastErr)
 }
 
 func parseCSV(ctx context.Context, jobID string, src models.SourceSpec, reader io.Reader, recordsCh chan<- models.Record, progressCh chan<- ProgressEvent, errorCh chan<- ErrorEvent) error {

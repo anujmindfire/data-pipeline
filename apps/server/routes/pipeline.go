@@ -5,11 +5,11 @@ for the dashboard SPA frontend application, and applies the CORS/Content-Type mi
 package routes
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -17,7 +17,10 @@ import (
 	"time"
 
 	"data-processing-pipeline/apps/server/controller"
+	"data-processing-pipeline/packages/shared/logger"
 	"data-processing-pipeline/packages/shared/utils"
+
+	"github.com/google/uuid"
 )
 
 // getStaticDir retrieves the path to the frontend assets from the environment variable.
@@ -28,7 +31,7 @@ func getStaticDir() string {
 	}
 	// Verify if the static directory exists on the filesystem
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		fmt.Printf("[Warning] Static directory %q does not exist or is not a directory. SPA frontend might not be served correctly.\n", dir)
+		logger.Warn(context.Background(), "Static directory does not exist, SPA frontend may not be served", "dir", dir)
 	}
 	return dir
 }
@@ -117,7 +120,21 @@ func RegisterRoutes(mux *http.ServeMux, ctrl *controller.PipelineController) htt
 		w.Write([]byte(html))
 	})
 
-	return rateLimitMiddleware(corsMiddleware(mux))
+	return correlationIDMiddleware(rateLimitMiddleware(corsMiddleware(mux)))
+}
+
+// correlationIDMiddleware generates or forwards an X-Request-ID for every request
+// and stores it in the context so all downstream handlers and logs can reference it.
+func correlationIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.Header.Get("X-Request-ID")
+		if id == "" {
+			id = uuid.NewString()
+		}
+		w.Header().Set("X-Request-ID", id)
+		ctx := logger.WithCorrelationID(r.Context(), id)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
