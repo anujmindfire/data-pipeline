@@ -492,3 +492,109 @@ func TestGetMetrics(t *testing.T) {
 		t.Errorf("Expected metrics body to contain 'pipeline_records_processed_total'")
 	}
 }
+
+func TestNewRouteAndBodyValidations(t *testing.T) {
+	database, err := config.ConnectDatabase()
+	if err != nil {
+		t.Skip("Skipping validations test: PostgreSQL database not reachable")
+	}
+
+	jobRepo := repository.NewPipelineJobRepository(database)
+	errRepo := repository.NewJobErrorRepository(database)
+	resultRepo := repository.NewJobResultsRepository(database)
+	pipeService := service.NewPipelineService(jobRepo, errRepo, resultRepo)
+	ctrl := controller.NewPipelineController(pipeService, jobRepo, errRepo, resultRepo)
+
+	t.Run("CreatePipeline - Invalid API Version returns 400", func(t *testing.T) {
+		spec := models.JobSpec{
+			ID: "valid-id",
+			Sources: []models.SourceSpec{
+				{ID: "src-1", Type: "csv", Path: "samples/biometrics_sample.csv"},
+			},
+		}
+		bodyBytes, _ := json.Marshal(spec)
+		req := httptest.NewRequest("POST", "/api/v2/pipelines", bytes.NewBuffer(bodyBytes))
+		req.SetPathValue("version", "v2") // explicitly set path value to v2
+		w := httptest.NewRecorder()
+
+		ctrl.CreatePipeline(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("Expected status 400 Bad Request, got %d", resp.StatusCode)
+		}
+		if !strings.Contains(w.Body.String(), "unsupported API version: v2") {
+			t.Errorf("Expected unsupported API version error, got: %s", w.Body.String())
+		}
+	})
+
+	t.Run("CreatePipeline - Invalid Job ID returns 400", func(t *testing.T) {
+		spec := models.JobSpec{
+			ID: "invalid_id_*_chars",
+			Sources: []models.SourceSpec{
+				{ID: "src-1", Type: "csv", Path: "samples/biometrics_sample.csv"},
+			},
+		}
+		bodyBytes, _ := json.Marshal(spec)
+		req := httptest.NewRequest("POST", "/api/v1/pipelines", bytes.NewBuffer(bodyBytes))
+		req.SetPathValue("version", "v1")
+		w := httptest.NewRecorder()
+
+		ctrl.CreatePipeline(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("Expected status 400 Bad Request, got %d", resp.StatusCode)
+		}
+		if !strings.Contains(w.Body.String(), "Invalid job ID") {
+			t.Errorf("Expected invalid job ID error, got: %s", w.Body.String())
+		}
+	})
+
+	t.Run("CreatePipeline - Directory Traversal Source Path returns 400", func(t *testing.T) {
+		spec := models.JobSpec{
+			ID: "valid-id",
+			Sources: []models.SourceSpec{
+				{ID: "src-1", Type: "csv", Path: "samples/../../etc/passwd"},
+			},
+		}
+		bodyBytes, _ := json.Marshal(spec)
+		req := httptest.NewRequest("POST", "/api/v1/pipelines", bytes.NewBuffer(bodyBytes))
+		w := httptest.NewRecorder()
+
+		ctrl.CreatePipeline(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("Expected status 400 Bad Request, got %d", resp.StatusCode)
+		}
+		if !strings.Contains(w.Body.String(), "Directory traversal path patterns are not allowed") {
+			t.Errorf("Expected directory traversal error, got: %s", w.Body.String())
+		}
+	})
+
+	t.Run("CreatePipeline - Invalid Validation Rule returns 400", func(t *testing.T) {
+		spec := models.JobSpec{
+			ID: "valid-id",
+			Sources: []models.SourceSpec{
+				{ID: "src-1", Type: "csv", Path: "samples/biometrics_sample.csv"},
+			},
+			ValidationRules: []models.ValidationRuleSpec{
+				{Field: "height", Rule: "unknown_rule_type"},
+			},
+		}
+		bodyBytes, _ := json.Marshal(spec)
+		req := httptest.NewRequest("POST", "/api/v1/pipelines", bytes.NewBuffer(bodyBytes))
+		w := httptest.NewRecorder()
+
+		ctrl.CreatePipeline(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("Expected status 400 Bad Request, got %d", resp.StatusCode)
+		}
+		if !strings.Contains(w.Body.String(), "Unsupported validation rule") {
+			t.Errorf("Expected unsupported validation rule error, got: %s", w.Body.String())
+		}
+	})
+}

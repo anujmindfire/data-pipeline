@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,6 +22,50 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// Helper to validate job IDs (only 1-64 alphanumeric, hyphen, or underscore characters)
+func isValidJobID(id string) bool {
+	if len(id) == 0 || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// Helper to validate paths against directory traversal (no ".." or "\")
+func isSafePath(path string) bool {
+	if strings.Contains(path, "..") || strings.Contains(path, "\\") {
+		return false
+	}
+	return true
+}
+
+// Helper to parse and validate API version from path, Accept header, or X-API-Version header
+func getAndValidateVersion(r *http.Request) (string, error) {
+	version := r.PathValue("version")
+	if version == "" {
+		version = r.Header.Get("X-API-Version")
+	}
+	if version == "" {
+		accept := r.Header.Get("Accept")
+		if strings.Contains(accept, "vnd.pipeline.v1") {
+			version = "v1"
+		} else if strings.Contains(accept, "vnd.pipeline.v2") {
+			version = "v2"
+		}
+	}
+	if version == "" {
+		version = "v1"
+	}
+	if version != "v1" {
+		return "", fmt.Errorf("unsupported API version: %s", version)
+	}
+	return version, nil
+}
 
 type PipelineController struct {
 	pipelineService *service.PipelineService
@@ -44,9 +89,27 @@ func NewPipelineController(
 }
 
 func (c *PipelineController) CreatePipeline(w http.ResponseWriter, r *http.Request) {
+	// Validate API version
+	if _, err := getAndValidateVersion(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	var spec models.JobSpec
 	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
 		writeJSONError(w, http.StatusBadRequest, utils.MsgInvalidPayload+err.Error())
+		return
+	}
+
+	// Validate Job ID if specified
+	if spec.ID != "" && !isValidJobID(spec.ID) {
+		writeJSONError(w, http.StatusBadRequest, "Invalid job ID: must be 1-64 alphanumeric, hyphen, or underscore characters")
+		return
+	}
+
+	// Validate Job Name
+	if spec.Name != "" && (len(spec.Name) == 0 || len(spec.Name) > 255) {
+		writeJSONError(w, http.StatusBadRequest, "Invalid job name: must be 1-255 characters")
 		return
 	}
 
@@ -64,15 +127,116 @@ func (c *PipelineController) CreatePipeline(w http.ResponseWriter, r *http.Reque
 		spec.Name = "Pipeline-" + spec.ID
 	}
 
-	// Validate paths and types
+	// Validate paths and types of Ingest Sources
 	for i, src := range spec.Sources {
 		if src.ID == "" {
 			spec.Sources[i].ID = fmt.Sprintf("src-%d", i+1)
+		} else if !isValidJobID(src.ID) {
+			writeJSONError(w, http.StatusBadRequest, "Invalid source ID: must be 1-64 alphanumeric, hyphen, or underscore characters")
+			return
 		}
 		if src.Type == "" || src.Path == "" {
 			writeJSONError(w, http.StatusBadRequest, utils.MsgSourceFieldsRequired)
 			return
 		}
+		srcType := strings.ToLower(src.Type)
+		if srcType != "csv" && srcType != "json" && srcType != "api" {
+			writeJSONError(w, http.StatusBadRequest, "Unsupported source type: "+src.Type)
+			return
+		}
+		if srcType == "api" {
+			if !strings.HasPrefix(src.Path, "http://") && !strings.HasPrefix(src.Path, "https://") {
+				writeJSONError(w, http.StatusBadRequest, "API source path must start with http:// or https://")
+				return
+			}
+		} else {
+			if !isSafePath(src.Path) {
+				writeJSONError(w, http.StatusBadRequest, "Directory traversal path patterns are not allowed in source path")
+				return
+			}
+		}
+	}
+
+	// Validate ValidationRules
+	for _, rule := range spec.ValidationRules {
+		if rule.Field == "" {
+			writeJSONError(w, http.StatusBadRequest, "Validation rule 'field' cannot be empty")
+			return
+		}
+		ruleType := strings.ToLower(rule.Rule)
+		if ruleType != "required" && ruleType != "min" && ruleType != "max" && ruleType != "type" && ruleType != "regex" {
+			writeJSONError(w, http.StatusBadRequest, "Unsupported validation rule: "+rule.Rule)
+			return
+		}
+		if ruleType == "type" {
+			typeParam := strings.ToLower(rule.Param)
+			if typeParam != "int" && typeParam != "float" && typeParam != "bool" && typeParam != "string" {
+				writeJSONError(w, http.StatusBadRequest, "Unsupported type validation parameter: "+rule.Param)
+				return
+			}
+		}
+		if ruleType == "regex" {
+			if _, err := regexp.Compile(rule.Param); err != nil {
+				writeJSONError(w, http.StatusBadRequest, "Invalid regex pattern: "+err.Error())
+				return
+			}
+		}
+	}
+
+	// Validate TransformRules
+	for _, rule := range spec.TransformRules {
+		if rule.Field == "" {
+			writeJSONError(w, http.StatusBadRequest, "Transform rule 'field' cannot be empty")
+			return
+		}
+		ruleType := strings.ToLower(rule.Rule)
+		if ruleType != "cast" && ruleType != "trim" && ruleType != "lower" && ruleType != "upper" && ruleType != "enrich_time" && ruleType != "add_constant" {
+			writeJSONError(w, http.StatusBadRequest, "Unsupported transform rule: "+rule.Rule)
+			return
+		}
+		if ruleType == "cast" {
+			castParam := strings.ToLower(rule.Param)
+			if castParam != "float" && castParam != "int" && castParam != "string" && castParam != "bool" {
+				writeJSONError(w, http.StatusBadRequest, "Unsupported cast transform parameter: "+rule.Param)
+				return
+			}
+		}
+	}
+
+	// Validate AggregationSpecs
+	for _, agg := range spec.AggregationTypes {
+		if agg.Field == "" || agg.Target == "" {
+			writeJSONError(w, http.StatusBadRequest, "Aggregation field and target cannot be empty")
+			return
+		}
+		fnType := strings.ToLower(agg.Func)
+		if fnType != "count" && fnType != "sum" && fnType != "avg" && fnType != "min" && fnType != "max" {
+			writeJSONError(w, http.StatusBadRequest, "Unsupported aggregation function: "+agg.Func)
+			return
+		}
+	}
+
+	// Validate ExportTargets
+	for _, exp := range spec.ExportTargets {
+		if exp.Type == "" || exp.Path == "" {
+			writeJSONError(w, http.StatusBadRequest, "Export target type and path cannot be empty")
+			return
+		}
+		expType := strings.ToLower(exp.Type)
+		if expType != "json" && expType != "csv" {
+			writeJSONError(w, http.StatusBadRequest, "Unsupported export target type: "+exp.Type)
+			return
+		}
+		if !isSafePath(exp.Path) {
+			writeJSONError(w, http.StatusBadRequest, "Directory traversal path patterns are not allowed in export path")
+			return
+		}
+	}
+
+	// Validate WorkerPoolSizes
+	if spec.WorkerPoolSizes.Validation > 100 || spec.WorkerPoolSizes.Transformation > 100 {
+		writeJSONError(w, http.StatusBadRequest, "Worker pool sizes exceed maximum limit of 100")
+		return
 	}
 
 	// Set default workers if unset
@@ -118,6 +282,12 @@ func (c *PipelineController) CreatePipeline(w http.ResponseWriter, r *http.Reque
 }
 
 func (c *PipelineController) ListPipelines(w http.ResponseWriter, r *http.Request) {
+	// Validate API version
+	if _, err := getAndValidateVersion(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	dbJobs, err := c.jobRepo.FindAll()
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, utils.MsgListJobsFailed+err.Error())
@@ -143,9 +313,19 @@ func (c *PipelineController) ListPipelines(w http.ResponseWriter, r *http.Reques
 }
 
 func (c *PipelineController) GetPipeline(w http.ResponseWriter, r *http.Request) {
+	// Validate API version
+	if _, err := getAndValidateVersion(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
+		return
+	}
+	if !isValidJobID(id) {
+		writeJSONError(w, http.StatusBadRequest, "Invalid job ID format")
 		return
 	}
 
@@ -159,9 +339,19 @@ func (c *PipelineController) GetPipeline(w http.ResponseWriter, r *http.Request)
 }
 
 func (c *PipelineController) GetProgress(w http.ResponseWriter, r *http.Request) {
+	// Validate API version
+	if _, err := getAndValidateVersion(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
+		return
+	}
+	if !isValidJobID(id) {
+		writeJSONError(w, http.StatusBadRequest, "Invalid job ID format")
 		return
 	}
 
@@ -209,9 +399,19 @@ func (c *PipelineController) GetProgress(w http.ResponseWriter, r *http.Request)
 }
 
 func (c *PipelineController) GetResults(w http.ResponseWriter, r *http.Request) {
+	// Validate API version
+	if _, err := getAndValidateVersion(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
+		return
+	}
+	if !isValidJobID(id) {
+		writeJSONError(w, http.StatusBadRequest, "Invalid job ID format")
 		return
 	}
 
@@ -236,9 +436,19 @@ func (c *PipelineController) GetResults(w http.ResponseWriter, r *http.Request) 
 }
 
 func (c *PipelineController) GetErrors(w http.ResponseWriter, r *http.Request) {
+	// Validate API version
+	if _, err := getAndValidateVersion(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
+		return
+	}
+	if !isValidJobID(id) {
+		writeJSONError(w, http.StatusBadRequest, "Invalid job ID format")
 		return
 	}
 
@@ -252,9 +462,19 @@ func (c *PipelineController) GetErrors(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *PipelineController) CancelPipeline(w http.ResponseWriter, r *http.Request) {
+	// Validate API version
+	if _, err := getAndValidateVersion(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
+		return
+	}
+	if !isValidJobID(id) {
+		writeJSONError(w, http.StatusBadRequest, "Invalid job ID format")
 		return
 	}
 
@@ -285,9 +505,19 @@ func (c *PipelineController) CancelPipeline(w http.ResponseWriter, r *http.Reque
 }
 
 func (c *PipelineController) DeletePipeline(w http.ResponseWriter, r *http.Request) {
+	// Validate API version
+	if _, err := getAndValidateVersion(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, utils.MsgMissingID)
+		return
+	}
+	if !isValidJobID(id) {
+		writeJSONError(w, http.StatusBadRequest, "Invalid job ID format")
 		return
 	}
 

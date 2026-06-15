@@ -2,14 +2,14 @@ package utils
 
 // API Route constants
 const (
-	RouteCreatePipeline = "POST /api/v1/pipelines"
-	RouteListPipelines  = "GET /api/v1/pipelines"
-	RouteGetPipeline   = "GET /api/v1/pipelines/{id}"
-	RouteGetProgress   = "GET /api/v1/pipelines/{id}/progress"
-	RouteGetResults    = "GET /api/v1/pipelines/{id}/results"
-	RouteGetErrors     = "GET /api/v1/pipelines/{id}/errors"
-	RouteCancelPipeline = "PATCH /api/v1/pipelines/{id}/cancel"
-	RouteDeletePipeline = "DELETE /api/v1/pipelines/{id}"
+	RouteCreatePipeline = "POST /api/{version}/pipelines"
+	RouteListPipelines  = "GET /api/{version}/pipelines"
+	RouteGetPipeline   = "GET /api/{version}/pipelines/{id}"
+	RouteGetProgress   = "GET /api/{version}/pipelines/{id}/progress"
+	RouteGetResults    = "GET /api/{version}/pipelines/{id}/results"
+	RouteGetErrors     = "GET /api/{version}/pipelines/{id}/errors"
+	RouteCancelPipeline = "PATCH /api/{version}/pipelines/{id}/cancel"
+	RouteDeletePipeline = "DELETE /api/{version}/pipelines/{id}"
 	RouteMetrics       = "GET /metrics"
 )
 
