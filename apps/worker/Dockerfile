@@ -21,13 +21,19 @@ FROM alpine:latest
 # Install basic tzdata and security certificates
 RUN apk add --no-cache tzdata ca-certificates
 
+# Create a non-root user and group to run the application
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 WORKDIR /app
 
 # Copy compiled binary from builder
 COPY --from=builder /app/worker .
 
-# Pre-create data and samples directories
-RUN mkdir -p data samples
+# Pre-create data and samples directories and set correct ownership
+RUN mkdir -p data samples && chown -R appuser:appgroup /app
+
+# Drop root: run as non-root user
+USER appuser:appgroup
 
 # Start the background worker
 ENTRYPOINT ["./worker"]

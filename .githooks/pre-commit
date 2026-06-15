@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit
+# Runs code quality checks before each commit to enforce standards.
+# Install: git config core.hooksPath .githooks
+
+set -e
+
+echo "▶ Running go fmt..."
+UNFORMATTED=$(gofmt -l .)
+if [ -n "$UNFORMATTED" ]; then
+  echo "❌ The following files need formatting (run 'go fmt ./...'):"
+  echo "$UNFORMATTED"
+  exit 1
+fi
+echo "✅ go fmt passed"
+
+echo "▶ Running go vet..."
+go vet ./...
+echo "✅ go vet passed"
+
+echo "▶ Running go build (compile check)..."
+CGO_ENABLED=0 go build ./... > /dev/null
+echo "✅ go build passed"
+
+echo "✅ All pre-commit checks passed."
