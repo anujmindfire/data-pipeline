@@ -12,13 +12,13 @@ import (
 func ConnectDatabase() (*gorm.DB, error) {
 	host := os.Getenv("DB_HOST")
 	port := os.Getenv("DB_PORT")
-	user := os.Getenv("DB_USERS")
+	user := os.Getenv("DB_USER")
 	password := os.Getenv("DB_PASSWORD")
 	dbname := os.Getenv("DB_DATABASE")
 	sslmode := os.Getenv("DB_SSLMODE")
 
 	if host == "" || port == "" || user == "" || password == "" || dbname == "" {
-		return nil, fmt.Errorf("missing required database environment variables (DB_HOST, DB_PORT, DB_USERS, DB_PASSWORD, DB_DATABASE)")
+		return nil, fmt.Errorf("missing required database environment variables (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE)")
 	}
 	if sslmode == "" {
 		sslmode = "disable"

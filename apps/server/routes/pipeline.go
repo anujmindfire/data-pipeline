@@ -5,6 +5,7 @@ for the dashboard SPA frontend application, and applies the CORS/Content-Type mi
 package routes
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -13,23 +14,17 @@ import (
 	"data-processing-pipeline/packages/shared/utils"
 )
 
-// getStaticDir dynamically finds the path to the frontend assets.
+// getStaticDir retrieves the path to the frontend assets from the environment variable.
 func getStaticDir() string {
-	if dir := os.Getenv("STATIC_DIR"); dir != "" {
-		return dir
+	dir := os.Getenv("STATIC_DIR")
+	if dir == "" {
+		dir = "./apps/web"
 	}
-	candidates := []string{
-		"./apps/web",
-		"./web",
-		"../web",
-		"../../apps/web",
+	// Verify if the static directory exists on the filesystem
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		fmt.Printf("[Warning] Static directory %q does not exist or is not a directory. SPA frontend might not be served correctly.\n", dir)
 	}
-	for _, c := range candidates {
-		if info, err := os.Stat(c); err == nil && info.IsDir() {
-			return c
-		}
-	}
-	return "./web"
+	return dir
 }
 
 // RegisterRoutes registers all pipeline API endpoints and static SPA dashboard routes.
