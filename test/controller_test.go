@@ -2,7 +2,11 @@ package test
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +15,7 @@ import (
 	"time"
 
 	"data-processing-pipeline/apps/server/controller"
+	"data-processing-pipeline/apps/server/routes"
 	"data-processing-pipeline/apps/server/service"
 	"data-processing-pipeline/packages/shared/config"
 	"data-processing-pipeline/packages/shared/models"
@@ -587,6 +592,31 @@ func TestNewRouteAndBodyValidations(t *testing.T) {
 		}
 	})
 
+	t.Run("CreatePipeline - Directory Traversal Export Path returns 400", func(t *testing.T) {
+		spec := models.JobSpec{
+			ID: "valid-id",
+			Sources: []models.SourceSpec{
+				{ID: "src-1", Type: "csv", Path: "samples/biometrics_sample.csv"},
+			},
+			ExportTargets: []models.ExportTargetSpec{
+				{Type: "json", Path: "data/exports/../../etc/passwd"},
+			},
+		}
+		bodyBytes, _ := json.Marshal(spec)
+		req := httptest.NewRequest("POST", "/api/v1/pipelines", bytes.NewBuffer(bodyBytes))
+		w := httptest.NewRecorder()
+
+		ctrl.CreatePipeline(w, req)
+
+		resp := w.Result()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("Expected status 400 Bad Request, got %d", resp.StatusCode)
+		}
+		if !strings.Contains(w.Body.String(), "Directory traversal path patterns are not allowed") {
+			t.Errorf("Expected directory traversal error, got: %s", w.Body.String())
+		}
+	})
+
 	t.Run("CreatePipeline - Invalid Validation Rule returns 400", func(t *testing.T) {
 		spec := models.JobSpec{
 			ID: "valid-id",
@@ -702,4 +732,103 @@ func TestDatabaseCascadingDeletes(t *testing.T) {
 		t.Errorf("Expected job results to be deleted due to cascade delete, but it still exists")
 	}
 }
+
+func generateTestJWT(secret []byte, exp int64) string {
+	header := `{"alg":"HS256","typ":"JWT"}`
+	payload := fmt.Sprintf(`{"exp":%d}`, exp)
+	hEnc := base64.RawURLEncoding.EncodeToString([]byte(header))
+	pEnc := base64.RawURLEncoding.EncodeToString([]byte(payload))
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(hEnc + "." + pEnc))
+	sigEnc := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return hEnc + "." + pEnc + "." + sigEnc
+}
+
+func TestAuthMiddlewareAndRateLimiter(t *testing.T) {
+	database, err := config.ConnectDatabase()
+	if err != nil {
+		t.Skip("Skipping middleware tests: PostgreSQL database not reachable")
+	}
+
+	jobRepo := repository.NewPipelineJobRepository(database)
+	errRepo := repository.NewJobErrorRepository(database)
+	resultRepo := repository.NewJobResultsRepository(database)
+	pipeService := service.NewPipelineService(jobRepo, errRepo, resultRepo)
+	ctrl := controller.NewPipelineController(pipeService, jobRepo, errRepo, resultRepo)
+
+	mux := http.NewServeMux()
+	handler := routes.RegisterRoutes(mux, ctrl)
+
+	t.Run("Mutating route without auth returns 401", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/pipelines", bytes.NewBufferString("{}"))
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d", w.Code)
+		}
+	})
+
+	t.Run("Mutating route with invalid API Key returns 401", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/pipelines", bytes.NewBufferString("{}"))
+		req.Header.Set("X-API-Key", "wrong-key")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d", w.Code)
+		}
+	})
+
+	t.Run("Mutating route with valid API Key passes auth", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/pipelines", bytes.NewBufferString("{}"))
+		req.Header.Set("X-API-Key", "dev-api-key-99")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code == http.StatusUnauthorized {
+			t.Errorf("Expected authentication to pass (not 401), got %d", w.Code)
+		}
+	})
+
+	t.Run("Mutating route with invalid Bearer JWT returns 401", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/pipelines", bytes.NewBufferString("{}"))
+		req.Header.Set("Authorization", "Bearer invalid.token.signature")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d", w.Code)
+		}
+	})
+
+	t.Run("Mutating route with valid Bearer JWT passes auth", func(t *testing.T) {
+		token := generateTestJWT([]byte("dev-jwt-secret-99"), time.Now().Add(time.Hour).Unix())
+		req := httptest.NewRequest("POST", "/api/v1/pipelines", bytes.NewBufferString("{}"))
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code == http.StatusUnauthorized {
+			t.Errorf("Expected authentication to pass (not 401), got %d", w.Code)
+		}
+	})
+
+	t.Run("Rate limiter blocks excess requests with 429", func(t *testing.T) {
+		blocked := false
+		for i := 0; i < 15; i++ {
+			req := httptest.NewRequest("GET", "/swagger.json", nil)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			if w.Code == http.StatusTooManyRequests {
+				blocked = true
+				break
+			}
+		}
+		if !blocked {
+			t.Errorf("Expected rate limiter to return 429 Too Many Requests after 15 rapid requests")
+		}
+	})
+}
+
 

@@ -5,10 +5,16 @@ for the dashboard SPA frontend application, and applies the CORS/Content-Type mi
 package routes
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"data-processing-pipeline/apps/server/controller"
 	"data-processing-pipeline/packages/shared/utils"
@@ -39,14 +45,14 @@ func RegisterRoutes(mux *http.ServeMux, ctrl *controller.PipelineController) htt
 	mux.Handle("GET /app.js", fs)
 
 	// API REST Endpoints
-	mux.HandleFunc(utils.RouteCreatePipeline, ctrl.CreatePipeline)
+	mux.Handle(utils.RouteCreatePipeline, authMiddleware(http.HandlerFunc(ctrl.CreatePipeline)))
 	mux.HandleFunc(utils.RouteListPipelines, ctrl.ListPipelines)
 	mux.HandleFunc(utils.RouteGetPipeline, ctrl.GetPipeline)
 	mux.HandleFunc(utils.RouteGetProgress, ctrl.GetProgress)
 	mux.HandleFunc(utils.RouteGetResults, ctrl.GetResults)
 	mux.HandleFunc(utils.RouteGetErrors, ctrl.GetErrors)
-	mux.HandleFunc(utils.RouteCancelPipeline, ctrl.CancelPipeline)
-	mux.HandleFunc(utils.RouteDeletePipeline, ctrl.DeletePipeline)
+	mux.Handle(utils.RouteCancelPipeline, authMiddleware(http.HandlerFunc(ctrl.CancelPipeline)))
+	mux.Handle(utils.RouteDeletePipeline, authMiddleware(http.HandlerFunc(ctrl.DeletePipeline)))
 	
 	// Prometheus metrics endpoint
 	mux.HandleFunc(utils.RouteMetrics, ctrl.GetMetrics)
@@ -111,14 +117,14 @@ func RegisterRoutes(mux *http.ServeMux, ctrl *controller.PipelineController) htt
 		w.Write([]byte(html))
 	})
 
-	return corsMiddleware(mux)
+	return rateLimitMiddleware(corsMiddleware(mux))
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
@@ -130,5 +136,136 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 
 		next.ServeHTTP(w, r)
+	})
+}
+
+type ipLimiter struct {
+	tokens    float64
+	lastCheck time.Time
+}
+
+var (
+	limiters   = make(map[string]*ipLimiter)
+	limitMutex sync.Mutex
+)
+
+func rateLimitMiddleware(next http.Handler) http.Handler {
+	const (
+		maxTokens  = 10.0
+		refillRate = 2.0
+	)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			ip = strings.Split(xff, ",")[0]
+		} else if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			ip = xri
+		}
+		if idx := strings.LastIndex(ip, ":"); idx != -1 {
+			ip = ip[:idx]
+		}
+
+		limitMutex.Lock()
+		lim, exists := limiters[ip]
+		now := time.Now()
+		if !exists {
+			lim = &ipLimiter{
+				tokens:    maxTokens,
+				lastCheck: now,
+			}
+			limiters[ip] = lim
+		} else {
+			elapsed := now.Sub(lim.lastCheck).Seconds()
+			lim.tokens += elapsed * refillRate
+			if lim.tokens > maxTokens {
+				lim.tokens = maxTokens
+			}
+			lim.lastCheck = now
+		}
+
+		if lim.tokens < 1.0 {
+			limitMutex.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"Rate limit exceeded. Please try again later."}`))
+			return
+		}
+
+		lim.tokens -= 1.0
+		limitMutex.Unlock()
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func ValidateJWT(tokenStr string, secret []byte) bool {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return false
+	}
+
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(parts[0] + "." + parts[1]))
+	expectedSignature := mac.Sum(nil)
+
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return false
+	}
+
+	if !hmac.Equal(signature, expectedSignature) {
+		return false
+	}
+
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return false
+	}
+
+	if claims.Exp != 0 && time.Now().Unix() > claims.Exp {
+		return false
+	}
+
+	return true
+}
+
+func authMiddleware(next http.Handler) http.Handler {
+	apiKeyEnv := os.Getenv("API_KEY")
+	if apiKeyEnv == "" {
+		apiKeyEnv = "dev-api-key-99"
+	}
+	jwtSecretEnv := os.Getenv("JWT_SECRET")
+	if jwtSecretEnv == "" {
+		jwtSecretEnv = "dev-jwt-secret-99"
+	}
+	jwtSecret := []byte(jwtSecretEnv)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqKey := r.Header.Get("X-API-Key")
+		if reqKey != "" && reqKey == apiKeyEnv {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+			if ValidateJWT(tokenStr, jwtSecret) {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"Unauthorized. Missing or invalid X-API-Key or JWT Authorization header."}`))
 	})
 }

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -36,12 +37,36 @@ func isValidJobID(id string) bool {
 	return true
 }
 
-// Helper to validate paths against directory traversal (no ".." or "\")
-func isSafePath(path string) bool {
-	if strings.Contains(path, "..") || strings.Contains(path, "\\") {
+// Helper to validate paths against directory traversal and confine to allowed sandboxes
+func isSafePath(pathStr string) bool {
+	cleaned := filepath.Clean(pathStr)
+	
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
 		return false
 	}
-	return true
+	
+	var absPath string
+	if filepath.IsAbs(cleaned) {
+		absPath = cleaned
+	} else {
+		absPath = filepath.Join(cwd, cleaned)
+	}
+	absPath = filepath.Clean(absPath)
+	
+	// Allowed sandboxes:
+	// 1. cwd/data
+	// 2. cwd/samples
+	// 3. system temp directory (for tests)
+	dataSandbox := filepath.Join(cwd, "data")
+	samplesSandbox := filepath.Join(cwd, "samples")
+	tempSandbox := os.TempDir()
+	
+	if strings.HasPrefix(absPath, dataSandbox) || strings.HasPrefix(absPath, samplesSandbox) || strings.HasPrefix(absPath, tempSandbox) {
+		return true
+	}
+	return false
 }
 
 // Helper to parse and validate API version from path, Accept header, or X-API-Version header
@@ -150,10 +175,12 @@ func (c *PipelineController) CreatePipeline(w http.ResponseWriter, r *http.Reque
 				return
 			}
 		} else {
-			if !isSafePath(src.Path) {
+			cleaned := filepath.Clean(src.Path)
+			if !isSafePath(cleaned) {
 				writeJSONError(w, http.StatusBadRequest, "Directory traversal path patterns are not allowed in source path")
 				return
 			}
+			spec.Sources[i].Path = cleaned
 		}
 	}
 
@@ -217,7 +244,7 @@ func (c *PipelineController) CreatePipeline(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Validate ExportTargets
-	for _, exp := range spec.ExportTargets {
+	for i, exp := range spec.ExportTargets {
 		if exp.Type == "" || exp.Path == "" {
 			writeJSONError(w, http.StatusBadRequest, "Export target type and path cannot be empty")
 			return
@@ -227,10 +254,12 @@ func (c *PipelineController) CreatePipeline(w http.ResponseWriter, r *http.Reque
 			writeJSONError(w, http.StatusBadRequest, "Unsupported export target type: "+exp.Type)
 			return
 		}
-		if !isSafePath(exp.Path) {
+		cleaned := filepath.Clean(exp.Path)
+		if !isSafePath(cleaned) {
 			writeJSONError(w, http.StatusBadRequest, "Directory traversal path patterns are not allowed in export path")
 			return
 		}
+		spec.ExportTargets[i].Path = cleaned
 	}
 
 	// Validate WorkerPoolSizes
