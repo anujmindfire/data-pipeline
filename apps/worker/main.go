@@ -7,37 +7,38 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"data-processing-pipeline/apps/server/service"
 	"data-processing-pipeline/packages/shared/config"
+	"data-processing-pipeline/packages/shared/logger"
 	"data-processing-pipeline/packages/shared/models"
 	"data-processing-pipeline/packages/shared/repository"
-	"data-processing-pipeline/apps/server/service"
 
 	"github.com/joho/godotenv"
 )
 
 func main() {
-	fmt.Println("PIPELINE BACKGROUND WORKER SERVICE")
+	bg := context.Background()
+	logger.Info(bg, "PIPELINE BACKGROUND WORKER SERVICE starting")
 
 	// 1. Load environment variables
 	if err := godotenv.Load(); err != nil {
-		fmt.Println("[Info] No .env file loaded. Relying on system environment variables.")
+		logger.Info(bg, "No .env file loaded, relying on system environment variables")
 	} else {
-		fmt.Println("[Worker] Loaded environment variables from .env file")
+		logger.Info(bg, "Loaded environment variables from .env file")
 	}
 
 	// 2. Connect to GORM PostgreSQL Database
 	database, err := config.ConnectDatabase()
 	if err != nil {
-		fmt.Printf("[CRITICAL] Worker failed to connect to PostgreSQL: %v\n", err)
+		logger.Error(bg, "Worker failed to connect to PostgreSQL", "error", err)
 		os.Exit(1)
 	}
-	fmt.Println("[Worker DB] Connected to PostgreSQL successfully")
+	logger.Info(bg, "Worker connected to PostgreSQL successfully")
 
 	// 3. Initialize repos and services
 	jobRepo := repository.NewPipelineJobRepository(database)
@@ -55,11 +56,11 @@ func main() {
 
 	go func() {
 		<-stop
-		fmt.Println("\n[Worker] Shutdown signal received. Shutting down queue loops...")
+		logger.Info(bg, "Worker shutdown signal received, shutting down queue loops")
 		cancel()
 	}()
 
-	fmt.Println("[Worker] Starting queue poll loop. Watching for PENDING jobs...")
+	logger.Info(bg, "Worker starting queue poll loop, watching for PENDING jobs")
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -74,7 +75,7 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("[Worker] Worker loop stopped. Exiting...")
+			logger.Info(bg, "Worker loop stopped, exiting")
 			return
 		case <-jobDone:
 			isProcessing = false
@@ -82,7 +83,7 @@ func main() {
 				activeJobCancel()
 			}
 			activeJobCancel = nil
-			fmt.Println("[Worker] Active job finished. Ready to accept next PENDING job.")
+			logger.Info(bg, "Active job finished, ready for next PENDING job")
 		case <-ticker.C:
 			if isProcessing {
 				continue // Skip polling if already processing a job
@@ -95,13 +96,13 @@ func main() {
 				continue
 			}
 
-			fmt.Printf("[Worker] Found PENDING job: ID=%s\n", pendingJob.ID)
+			logger.Info(bg, "Found PENDING job", "job_id", pendingJob.ID)
 
 			// Parse Config JSON into models.JobSpec
 			var spec models.JobSpec
 			if err := json.Unmarshal([]byte(pendingJob.Config), &spec); err != nil {
-				errMsg := fmt.Sprintf("Failed to parse spec config: %v", err)
-				fmt.Printf("[Worker Error] Job %s spec parsing failed: %s\n", pendingJob.ID, errMsg)
+				errMsg := "Failed to parse spec config: " + err.Error()
+				logger.Error(bg, "Job spec parsing failed", "job_id", pendingJob.ID, "error", errMsg)
 				_ = jobRepo.Complete(pendingJob.ID, string(models.StatusFailed), &errMsg)
 				continue
 			}
@@ -116,12 +117,13 @@ func main() {
 					jobDone <- struct{}{}
 				}()
 
-				fmt.Printf("[Worker] Executing pipeline run for job ID=%s...\n", id)
-				errRun := pipelineService.RunPipeline(jCtx, js)
+				runCtx := logger.WithCorrelationID(jCtx, id)
+				logger.Info(runCtx, "Executing pipeline run", "job_id", id)
+				errRun := pipelineService.RunPipeline(runCtx, js)
 				if errRun != nil {
-					fmt.Printf("[Worker Error] Pipeline execution failed for job ID=%s: %v\n", id, errRun)
+					logger.Error(runCtx, "Pipeline execution failed", "job_id", id, "error", errRun)
 				} else {
-					fmt.Printf("[Worker] Pipeline execution completed for job ID=%s\n", id)
+					logger.Info(runCtx, "Pipeline execution completed", "job_id", id)
 				}
 			}(pendingJob.ID, &spec, jobCtx)
 		}

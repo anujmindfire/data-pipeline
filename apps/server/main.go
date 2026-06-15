@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,36 +17,39 @@ import (
 	"data-processing-pipeline/apps/server/routes"
 	"data-processing-pipeline/apps/server/service"
 	"data-processing-pipeline/packages/shared/config"
+	"data-processing-pipeline/packages/shared/logger"
 	"data-processing-pipeline/packages/shared/repository"
 
 	"github.com/joho/godotenv"
 )
 
 func main() {
+	bg := context.Background()
+
 	// 1. Ensure required directory structures exist
 	if err := os.MkdirAll("data/exports", 0755); err != nil {
-		fmt.Printf("[CRITICAL] Failed to create data/exports directory: %v\n", err)
+		logger.Error(bg, "Failed to create data/exports directory", "error", err)
 		os.Exit(1)
 	}
 	if err := os.MkdirAll("samples", 0755); err != nil {
-		fmt.Printf("[CRITICAL] Failed to create samples directory: %v\n", err)
+		logger.Error(bg, "Failed to create samples directory", "error", err)
 		os.Exit(1)
 	}
 
 	// 3. Load environment variables from .env file if present
 	if err := godotenv.Load(); err != nil {
-		fmt.Println("[Info] No .env file loaded. Relying on system environment variables.")
+		logger.Info(bg, "No .env file loaded, relying on system environment variables")
 	} else {
-		fmt.Println("[Main] Loaded environment variables from .env file")
+		logger.Info(bg, "Loaded environment variables from .env file")
 	}
 
 	// 4. Connect to GORM PostgreSQL Database
 	database, err := config.ConnectDatabase()
 	if err != nil {
-		fmt.Printf("[CRITICAL] Failed to connect to PostgreSQL: %v\n", err)
+		logger.Error(bg, "Failed to connect to PostgreSQL", "error", err)
 		os.Exit(1)
 	}
-	fmt.Println("[DB] Successfully connected to PostgreSQL and executed auto-migrations")
+	logger.Info(bg, "Connected to PostgreSQL and executed auto-migrations")
 
 	// 5. Initialize clean layered architecture
 	jobRepo := repository.NewPipelineJobRepository(database)
@@ -73,9 +75,9 @@ func main() {
 
 	// 7. Run Server in background
 	go func() {
-		fmt.Printf("[API] Server listening on http://%s\n", serverAddr)
+		logger.Info(bg, "Server listening", "addr", "http://"+serverAddr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("[CRITICAL] HTTP Server crashed: %v\n", err)
+			logger.Error(bg, "HTTP Server crashed", "error", err)
 			os.Exit(1)
 		}
 	}()
@@ -85,14 +87,14 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	<-stop
-	fmt.Println("\n[Main] Shutdown signal received. Stopping services gracefully...")
+	logger.Info(bg, "Shutdown signal received, stopping services gracefully")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		fmt.Printf("[Warning] Failed to stop HTTP Server cleanly: %v\n", err)
+		logger.Warn(bg, "Failed to stop HTTP Server cleanly", "error", err)
 	}
 
-	fmt.Println("[Main] Pipeline Service successfully stopped. Goodbye!")
+	logger.Info(bg, "Pipeline Service successfully stopped")
 }

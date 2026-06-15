@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"data-processing-pipeline/packages/shared/logger"
 	"data-processing-pipeline/packages/shared/models"
 	"data-processing-pipeline/packages/shared/pipeline"
 	"data-processing-pipeline/packages/shared/repository"
@@ -169,6 +170,7 @@ func (jp *JobProgressTracker) RUnlock() {
 // RunPipeline starts all pipeline stages concurrently, tracking metrics and syncing progress.
 func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec) error {
 	ctx, cancel := context.WithCancel(ctx)
+	ctx = logger.WithCorrelationID(ctx, spec.ID)
 	defer cancel()
 
 	// Register job in memory
@@ -218,7 +220,7 @@ func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec)
 				ErrorMessage: errEv.ErrorMessage,
 				OccurredAt:   time.Now(),
 			}); err != nil {
-				fmt.Printf("[Pipeline] Error saving job error: %v\n", err)
+				logger.Error(ctx, "Error saving job error to database", "job_id", spec.ID, "error", err)
 			}
 			
 			// Increment failed count if it is a record-level error
@@ -267,7 +269,7 @@ func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec)
 					// All ingestion done, we know the exact total input size
 					jp.TotalRecords = totalIngested
 					if err := s.jobRepo.SetTotalRecords(spec.ID, int(totalIngested)); err != nil {
-						fmt.Printf("[Pipeline] Error setting total records: %v\n", err)
+						logger.Error(ctx, "Error setting total records", "job_id", spec.ID, "error", err)
 					}
 				}
 			}
@@ -305,7 +307,7 @@ func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec)
 				jp.mu.RUnlock()
 
 				if err := s.jobRepo.SetJobCounts(spec.ID, proc, fail); err != nil {
-					fmt.Printf("[Pipeline] Error syncing job counts: %v\n", err)
+					logger.Error(ctx, "Error syncing job counts", "job_id", spec.ID, "error", err)
 				}
 
 				// Check database for cancellation signal
@@ -407,12 +409,12 @@ func (s *PipelineService) RunPipeline(ctx context.Context, spec *models.JobSpec)
 	// Update the DB entry explicitly with final absolute stats
 	err := s.jobRepo.Complete(spec.ID, string(finalStatus), errorSummary)
 	if err != nil {
-		fmt.Printf("[Pipeline] Error finalizing job %s: %v\n", spec.ID, err)
+		logger.Error(ctx, "Error finalizing job", "job_id", spec.ID, "error", err)
 	}
 
 	// Force absolute counter sync
 	if err := s.jobRepo.SetJobCounts(spec.ID, proc, fail); err != nil {
-		fmt.Printf("[Pipeline] Error syncing final job counts: %v\n", err)
+		logger.Error(ctx, "Error syncing final job counts", "job_id", spec.ID, "error", err)
 	}
 	return nil
 }
